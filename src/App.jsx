@@ -195,10 +195,6 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
-  // Add useEffect to log when component mounts
-  useEffect(() => {
-    console.log('App component mounted')
-  }, [])
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-600 to-indigo-700">

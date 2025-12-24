@@ -1,6 +1,7 @@
 {
   "name": "strava-art-website",
   "version": "1.0.0",
+  "homepage": "https://dennisg009.github.io/strava-art-website/",
   "type": "module",
   "scripts": {
     "dev": "vite",

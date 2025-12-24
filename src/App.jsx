@@ -18,13 +18,16 @@ function MapClickHandler({ onMapClick }) {
   return null
 }
 
-function MapController({ mapRef }) {
+function MapController({ mapRef, onMapReady }) {
   const map = useMap()
   useEffect(() => {
     if (mapRef) {
       mapRef.current = map
     }
-  }, [map, mapRef])
+    if (onMapReady) {
+      onMapReady()
+    }
+  }, [map, mapRef, onMapReady])
   return null
 }
 
@@ -46,6 +49,7 @@ function App() {
   const [imageBounds, setImageBounds] = useState(null)
   const [snapToRoads, setSnapToRoads] = useState(false)
   const [mapCenter, setMapCenter] = useState([40.7128, -74.0060])
+  const [mapReady, setMapReady] = useState(false)
   const mapRef = useRef(null)
 
   // Handle map click to add points
@@ -319,13 +323,13 @@ function App() {
         </div>
 
         {/* Map */}
-        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-xl overflow-hidden" style={{ minHeight: '600px' }}>
           <MapContainer
             center={mapCenter}
             zoom={13}
             style={{ height: '600px', width: '100%' }}
           >
-            <MapController mapRef={mapRef} />
+            <MapController mapRef={mapRef} onMapReady={() => setMapReady(true)} />
             <ChangeView center={mapCenter} zoom={13} />
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

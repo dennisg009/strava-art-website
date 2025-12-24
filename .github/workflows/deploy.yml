@@ -35,6 +35,12 @@ jobs:
         env:
           GITHUB_PAGES: true
       
+      - name: Verify build output
+        run: |
+          ls -la dist/
+          ls -la dist/assets/ || true
+          head -20 dist/index.html
+      
       - name: Setup Pages
         uses: actions/configure-pages@v4
       

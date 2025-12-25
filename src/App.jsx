@@ -50,42 +50,28 @@ function App() {
   const [snapToRoads, setSnapToRoads] = useState(false)
   const [mapCenter, setMapCenter] = useState([40.7128, -74.0060])
   const [mapReady, setMapReady] = useState(false)
+  const [isRouting, setIsRouting] = useState(false)
   const mapRef = useRef(null)
 
-  // Handle map click to add points
-  const handleMapClick = useCallback(async (e) => {
-    const newPoint = [e.latlng.lat, e.latlng.lng]
-    
-    if (snapToRoads && points.length > 0) {
-      // If snapping to roads and we have a previous point, get route
-      const lastPoint = points[points.length - 1]
-      try {
-        const route = await getOSRMRoute([lastPoint[0], lastPoint[1]], [newPoint[0], newPoint[1]])
-        if (route && route.length > 1) {
-          // Add route points excluding the first one (since it's the same as the last point)
-          setPoints(prev => [...prev, ...route.slice(1)])
-          return
-        }
-      } catch (error) {
-        console.error('OSRM route error:', error)
-      }
-    }
-    
-    setPoints(prev => [...prev, newPoint])
-  }, [points, snapToRoads])
-
   // Get OSRM route between two points
-  const getOSRMRoute = async (start, end) => {
-    const url = `http://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`
+  const getOSRMRoute = useCallback(async (start, end) => {
+    // Use HTTPS and the public OSRM instance
+    // Format: lon,lat (OSRM uses [longitude, latitude] order)
+    const url = `https://router.project-osrm.org/route/v1/driving/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`
     
     try {
       const response = await fetch(url)
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
       const data = await response.json()
       
       if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
         const coordinates = data.routes[0].geometry.coordinates
-        // Convert from [lng, lat] to [lat, lng] format
+        // Convert from [lng, lat] to [lat, lng] format for Leaflet
         return coordinates.map(coord => [coord[1], coord[0]])
+      } else {
+        console.warn('OSRM returned error code:', data.code)
       }
     } catch (error) {
       console.error('OSRM API error:', error)
@@ -93,7 +79,34 @@ function App() {
     
     // Fallback to straight line if OSRM fails
     return [[start[0], start[1]], [end[0], end[1]]]
-  }
+  }, [])
+
+  // Handle map click to add points
+  const handleMapClick = useCallback(async (e) => {
+    const newPoint = [e.latlng.lat, e.latlng.lng]
+    
+    if (snapToRoads && points.length > 0) {
+      // If snapping to roads and we have a previous point, get route
+      setIsRouting(true)
+      const lastPoint = points[points.length - 1]
+      try {
+        const route = await getOSRMRoute([lastPoint[0], lastPoint[1]], [newPoint[0], newPoint[1]])
+        if (route && route.length > 1) {
+          // Add route points excluding the first one (since it's the same as the last point)
+          setPoints(prev => [...prev, ...route.slice(1)])
+          setIsRouting(false)
+          return
+        }
+      } catch (error) {
+        console.error('OSRM route error:', error)
+        // Fall through to add the point normally
+      } finally {
+        setIsRouting(false)
+      }
+    }
+    
+    setPoints(prev => [...prev, newPoint])
+  }, [points, snapToRoads, getOSRMRoute])
 
   // Search location using Nominatim
   const handleSearch = async () => {
@@ -276,6 +289,9 @@ function App() {
                 />
                 <span className="text-gray-700">Snap to Roads (OSRM)</span>
               </label>
+              {isRouting && (
+                <p className="text-sm text-indigo-600">Routing...</p>
+              )}
             </div>
 
             {/* Action Buttons */}

@@ -108,6 +108,43 @@ function App() {
     setPoints(prev => [...prev, newPoint])
   }, [points, snapToRoads, getOSRMRoute])
 
+  // Center map on user's current location
+  const centerOnMyLocation = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser')
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords
+        setMapCenter([latitude, longitude])
+      },
+      (error) => {
+        console.error('Geolocation error:', error)
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            alert('Location access denied. Please enable location permissions in your browser settings.')
+            break
+          case error.POSITION_UNAVAILABLE:
+            alert('Location information is unavailable.')
+            break
+          case error.TIMEOUT:
+            alert('Location request timed out.')
+            break
+          default:
+            alert('An unknown error occurred while getting your location.')
+            break
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      }
+    )
+  }
+
   // Search location using Nominatim
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
@@ -235,9 +272,17 @@ function App() {
                 />
                 <button
                   onClick={handleSearch}
-                  className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+                  title="Search location"
                 >
                   🔍
+                </button>
+                <button
+                  onClick={centerOnMyLocation}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
+                  title="Center on my location"
+                >
+                  📍
                 </button>
               </div>
             </div>

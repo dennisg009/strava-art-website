@@ -302,14 +302,17 @@ function App() {
           const actualDistance = calculateRouteDistance(optimized)
           
           if (actualDistance > 0 && desiredMiles > 0) {
-            // Scale the route to match desired mileage
+            // Scale the route to match desired mileage - scale from center to preserve shape
             const scaleFactor = desiredMiles / actualDistance
-            const scaledRoute = optimized.map((point, idx) => {
-              if (idx === 0) return point // Keep first point fixed
-              const firstPoint = optimized[0]
-              const deltaLat = (point[0] - firstPoint[0]) * scaleFactor
-              const deltaLng = (point[1] - firstPoint[1]) * scaleFactor
-              return [firstPoint[0] + deltaLat, firstPoint[1] + deltaLng]
+            
+            // Find center of route
+            const centerLat = optimized.reduce((sum, p) => sum + p[0], 0) / optimized.length
+            const centerLng = optimized.reduce((sum, p) => sum + p[1], 0) / optimized.length
+            
+            const scaledRoute = optimized.map((point) => {
+              const deltaLat = (point[0] - centerLat) * scaleFactor
+              const deltaLng = (point[1] - centerLng) * scaleFactor
+              return [centerLat + deltaLat, centerLng + deltaLng]
             })
             resolve(scaledRoute)
           } else {

@@ -37,9 +37,18 @@ jobs:
       
       - name: Verify build output
         run: |
+          echo "=== Dist directory contents ==="
           ls -la dist/
+          echo ""
+          echo "=== Assets directory ==="
           ls -la dist/assets/ || true
-          head -20 dist/index.html
+          echo ""
+          echo "=== Built index.html (first 25 lines) ==="
+          head -25 dist/index.html
+          echo ""
+          echo "=== Checking for base path in HTML ==="
+          grep -o 'src="[^"]*"' dist/index.html | head -2
+          grep -o 'href="[^"]*\.css"' dist/index.html | head -2
       
       - name: Setup Pages
         uses: actions/configure-pages@v4

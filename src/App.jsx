@@ -372,12 +372,19 @@ function App() {
         // Also overlay the image for reference
         setImageOverlay(pendingImage)
         
-        // Fit map to route bounds
+        // Set image bounds based on route bounds
         if (mapRef.current && routePoints.length > 0) {
           const firstPoint = routePoints[0]
           const bounds = L.latLngBounds([firstPoint, firstPoint])
           routePoints.forEach(point => bounds.extend(point))
           
+          // Set image bounds to match route bounds
+          setImageBounds([
+            [bounds.getSouth(), bounds.getWest()],
+            [bounds.getNorth(), bounds.getEast()]
+          ])
+          
+          // Fit map to route bounds
           setTimeout(() => {
             if (mapRef.current) {
               mapRef.current.fitBounds(bounds, { padding: [50, 50] })

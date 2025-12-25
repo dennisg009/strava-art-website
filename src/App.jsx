@@ -51,6 +51,9 @@ function App() {
   const [mapCenter, setMapCenter] = useState([40.7128, -74.0060])
   const [mapReady, setMapReady] = useState(false)
   const [isRouting, setIsRouting] = useState(false)
+  const [isProcessingImage, setIsProcessingImage] = useState(false)
+  const [showMileagePrompt, setShowMileagePrompt] = useState(false)
+  const [pendingImage, setPendingImage] = useState(null)
   const mapRef = useRef(null)
 
   // Get OSRM route between two points
@@ -171,16 +174,225 @@ function App() {
     }
   }
 
+  // Calculate distance between two points in miles using Haversine formula
+  const calculateDistance = (point1, point2) => {
+    const R = 3959 // Earth's radius in miles
+    const lat1 = point1[0] * Math.PI / 180
+    const lat2 = point2[0] * Math.PI / 180
+    const deltaLat = (point2[0] - point1[0]) * Math.PI / 180
+    const deltaLng = (point2[1] - point1[1]) * Math.PI / 180
+    
+    const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+              Math.cos(lat1) * Math.cos(lat2) *
+              Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    
+    return R * c
+  }
+
+  // Calculate total route distance
+  const calculateRouteDistance = (routePoints) => {
+    let totalDistance = 0
+    for (let i = 1; i < routePoints.length; i++) {
+      totalDistance += calculateDistance(routePoints[i - 1], routePoints[i])
+    }
+    return totalDistance
+  }
+
+  // Process image to extract route points
+  const imageToRoute = async (imageDataUrl, desiredMiles) => {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        if (!mapRef.current) {
+          resolve([])
+          return
+        }
+
+        const bounds = mapRef.current.getBounds()
+        const center = bounds.getCenter()
+        const ne = bounds.getNorthEast()
+        const sw = bounds.getSouthWest()
+        
+        // Create canvas to process image
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        const maxSize = 200 // Higher resolution for better route quality
+        const scale = Math.min(maxSize / img.width, maxSize / img.height)
+        canvas.width = img.width * scale
+        canvas.height = img.height * scale
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+        // Convert to grayscale
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const data = imageData.data
+        const grayscale = new Uint8Array(canvas.width * canvas.height)
+        
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i]
+          const g = data[i + 1]
+          const b = data[i + 2]
+          const alpha = data[i + 3]
+          // Consider transparency - if alpha is low, treat as background
+          if (alpha < 128) {
+            grayscale[i / 4] = 255 // Treat transparent as white
+          } else {
+            grayscale[i / 4] = (r + g + b) / 3
+          }
+        }
+
+        // Find threshold (use adaptive threshold)
+        const sorted = Array.from(grayscale).sort((a, b) => a - b)
+        const threshold = sorted[Math.floor(sorted.length * 0.25)] // 25th percentile for dark pixels
+
+        // Extract route points by sampling dark pixels
+        const route = []
+        const step = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / 300)) // Adaptive step size
+        
+        for (let y = 0; y < canvas.height; y += step) {
+          for (let x = 0; x < canvas.width; x += step) {
+            const idx = y * canvas.width + x
+            if (grayscale[idx] < threshold) {
+              // Map image coordinates to map coordinates (centered on current view)
+              const normalizedX = (x / canvas.width - 0.5)
+              const normalizedY = (y / canvas.height - 0.5)
+              
+              const lat = center.lat + normalizedY * (ne.lat - sw.lat)
+              const lng = center.lng + normalizedX * (ne.lng - sw.lng)
+              route.push([lat, lng])
+            }
+          }
+        }
+
+        // If not enough points, try finer sampling
+        if (route.length < 50 && step > 1) {
+          route.length = 0
+          for (let y = 0; y < canvas.height; y += 1) {
+            for (let x = 0; x < canvas.width; x += 1) {
+              const idx = y * canvas.width + x
+              if (grayscale[idx] < threshold) {
+                const normalizedX = (x / canvas.width - 0.5)
+                const normalizedY = (y / canvas.height - 0.5)
+                const lat = center.lat + normalizedY * (ne.lat - sw.lat)
+                const lng = center.lng + normalizedX * (ne.lng - sw.lng)
+                route.push([lat, lng])
+              }
+            }
+          }
+        }
+
+        // Optimize route - remove points that are too close together
+        if (route.length > 1) {
+          const optimized = [route[0]]
+          const minDistance = 0.0001 // Minimum distance between points in degrees
+          
+          for (let i = 1; i < route.length; i++) {
+            const lastPoint = optimized[optimized.length - 1]
+            const currentPoint = route[i]
+            const dist = Math.sqrt(
+              Math.pow(currentPoint[0] - lastPoint[0], 2) +
+              Math.pow(currentPoint[1] - lastPoint[1], 2)
+            )
+            if (dist > minDistance) {
+              optimized.push(currentPoint)
+            }
+          }
+
+          // Calculate actual route distance
+          const actualDistance = calculateRouteDistance(optimized)
+          
+          if (actualDistance > 0 && desiredMiles > 0) {
+            // Scale the route to match desired mileage
+            const scaleFactor = desiredMiles / actualDistance
+            const scaledRoute = optimized.map((point, idx) => {
+              if (idx === 0) return point // Keep first point fixed
+              const firstPoint = optimized[0]
+              const deltaLat = (point[0] - firstPoint[0]) * scaleFactor
+              const deltaLng = (point[1] - firstPoint[1]) * scaleFactor
+              return [firstPoint[0] + deltaLat, firstPoint[1] + deltaLng]
+            })
+            resolve(scaledRoute)
+          } else {
+            resolve(optimized)
+          }
+        } else {
+          resolve([])
+        }
+      }
+      img.src = imageDataUrl
+    })
+  }
+
   // Handle image upload
   const handleImageUpload = (e) => {
     const file = e.target.files[0]
     if (!file) return
 
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      setImageOverlay(event.target.result)
+    // Check if it's a PNG
+    if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        setPendingImage(event.target.result)
+        setShowMileagePrompt(true)
+      }
+      reader.readAsDataURL(file)
+    } else {
+      // For non-PNG images, just overlay them
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        setImageOverlay(event.target.result)
+      }
+      reader.readAsDataURL(file)
     }
-    reader.readAsDataURL(file)
+  }
+
+  // Process image with mileage
+  const processImageWithMileage = async (miles) => {
+    if (!pendingImage) return
+    
+    const mileage = parseFloat(miles)
+    if (isNaN(mileage) || mileage <= 0) {
+      alert('Please enter a valid mileage greater than 0')
+      return
+    }
+
+    setIsProcessingImage(true)
+    setShowMileagePrompt(false)
+
+    try {
+      const routePoints = await imageToRoute(pendingImage, mileage)
+      
+      if (routePoints && routePoints.length > 0) {
+        // Set the points on the map
+        setPoints(routePoints)
+        
+        // Also overlay the image for reference
+        setImageOverlay(pendingImage)
+        
+        // Fit map to route bounds
+        if (mapRef.current && routePoints.length > 0) {
+          const firstPoint = routePoints[0]
+          const bounds = L.latLngBounds([firstPoint, firstPoint])
+          routePoints.forEach(point => bounds.extend(point))
+          
+          setTimeout(() => {
+            if (mapRef.current) {
+              mapRef.current.fitBounds(bounds, { padding: [50, 50] })
+            }
+          }, 100)
+        }
+        
+        alert(`Route generated! Created ${routePoints.length} points for approximately ${mileage.toFixed(1)} miles.`)
+      } else {
+        alert('Could not extract route from image. Make sure the image has a clear dark path/shape.')
+      }
+    } catch (error) {
+      console.error('Error processing image:', error)
+      alert('Error processing image. Please try again.')
+    } finally {
+      setIsProcessingImage(false)
+      setPendingImage(null)
+    }
   }
 
   // Set image bounds when image is uploaded (use current map center as bounds)
@@ -289,14 +501,18 @@ function App() {
 
             {/* Image Upload */}
             <div className="flex flex-col gap-2">
-              <label className="font-semibold text-gray-700">Upload Image Overlay</label>
+              <label className="font-semibold text-gray-700">Upload Image</label>
               <input
                 type="file"
                 accept="image/png,image/*"
                 onChange={handleImageUpload}
-                className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
+                disabled={isProcessingImage}
+                className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 disabled:opacity-50"
               />
-              {imageOverlay && (
+              {isProcessingImage && (
+                <p className="text-sm text-indigo-600">Processing image...</p>
+              )}
+              {imageOverlay && !isProcessingImage && (
                 <div className="flex items-center gap-2">
                   <label className="text-sm text-gray-600">Opacity:</label>
                   <input
@@ -321,6 +537,54 @@ function App() {
                 </div>
               )}
             </div>
+            
+            {/* Mileage Prompt Modal */}
+            {showMileagePrompt && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+                  <h3 className="text-xl font-bold mb-4">Enter Desired Route Distance</h3>
+                  <p className="text-gray-600 mb-4">
+                    How many miles would you like your route to be?
+                  </p>
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="100"
+                    step="0.1"
+                    placeholder="e.g., 5.0"
+                    id="mileage-input"
+                    className="w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 mb-4"
+                    autoFocus
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        const input = document.getElementById('mileage-input')
+                        processImageWithMileage(input.value)
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        const input = document.getElementById('mileage-input')
+                        processImageWithMileage(input.value)
+                      }}
+                      className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+                    >
+                      Generate Route
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowMileagePrompt(false)
+                        setPendingImage(null)
+                      }}
+                      className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Snap to Roads Toggle */}
             <div className="flex flex-col gap-2">

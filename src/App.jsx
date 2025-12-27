@@ -307,11 +307,14 @@ function App() {
     const ne = bounds.getNorthEast()
     const sw = bounds.getSouthWest()
     
-    return svgPoints.map(point => {
-      const lat = center.lat + (point[1] - 0.5) * (ne.lat - sw.lat)
-      const lng = center.lng + (point[0] - 0.5) * (ne.lng - sw.lng)
-      return [lat, lng]
-    })
+    return svgPoints
+      .filter(point => !isNaN(point[0]) && !isNaN(point[1]))
+      .map(point => {
+        const lat = center.lat + (point[1] - 0.5) * (ne.lat - sw.lat)
+        const lng = center.lng + (point[0] - 0.5) * (ne.lng - sw.lng)
+        return [lat, lng]
+      })
+      .filter(coord => !isNaN(coord[0]) && !isNaN(coord[1]))
   }
 
   // Handle PNG reference overlay upload
@@ -378,63 +381,77 @@ function App() {
     const tagName = element.tagName.toLowerCase()
     const points = []
 
-    if (tagName === 'rect') {
-      const x = parseFloat(element.getAttribute('x') || 0)
-      const y = parseFloat(element.getAttribute('y') || 0)
-      const width = parseFloat(element.getAttribute('width') || 0)
-      const height = parseFloat(element.getAttribute('height') || 0)
-      // Create rectangle as 4 corners
-      points.push([x, y])
-      points.push([x + width, y])
-      points.push([x + width, y + height])
-      points.push([x, y + height])
-      points.push([x, y]) // Close the rectangle
-    } else if (tagName === 'circle' || tagName === 'ellipse') {
-      const cx = parseFloat(element.getAttribute('cx') || 0)
-      const cy = parseFloat(element.getAttribute('cy') || 0)
-      const r = tagName === 'circle' 
-        ? parseFloat(element.getAttribute('r') || 0)
-        : parseFloat(element.getAttribute('rx') || 0)
-      const ry = tagName === 'ellipse'
-        ? parseFloat(element.getAttribute('ry') || r)
-        : r
-      // Create circle/ellipse as points around the perimeter
-      const steps = 32
-      for (let i = 0; i <= steps; i++) {
-        const angle = (i / steps) * Math.PI * 2
-        points.push([cx + r * Math.cos(angle), cy + ry * Math.sin(angle)])
-      }
-    } else if (tagName === 'polygon' || tagName === 'polyline') {
-      const pointsAttr = element.getAttribute('points')
-      if (pointsAttr) {
-        const coords = pointsAttr.trim().split(/[\s,]+/).filter(s => s).map(Number)
-        for (let i = 0; i < coords.length; i += 2) {
-          if (i + 1 < coords.length) {
-            points.push([coords[i], coords[i + 1]])
+    try {
+      if (tagName === 'rect') {
+        const x = parseFloat(element.getAttribute('x') || 0)
+        const y = parseFloat(element.getAttribute('y') || 0)
+        const width = parseFloat(element.getAttribute('width') || 0)
+        const height = parseFloat(element.getAttribute('height') || 0)
+        // Skip if any values are NaN
+        if (isNaN(x) || isNaN(y) || isNaN(width) || isNaN(height)) return []
+        // Create rectangle as 4 corners
+        points.push([x, y])
+        points.push([x + width, y])
+        points.push([x + width, y + height])
+        points.push([x, y + height])
+        points.push([x, y]) // Close the rectangle
+      } else if (tagName === 'circle' || tagName === 'ellipse') {
+        const cx = parseFloat(element.getAttribute('cx') || 0)
+        const cy = parseFloat(element.getAttribute('cy') || 0)
+        const r = tagName === 'circle' 
+          ? parseFloat(element.getAttribute('r') || 0)
+          : parseFloat(element.getAttribute('rx') || 0)
+        const ry = tagName === 'ellipse'
+          ? parseFloat(element.getAttribute('ry') || r)
+          : r
+        // Skip if any values are NaN
+        if (isNaN(cx) || isNaN(cy) || isNaN(r) || isNaN(ry)) return []
+        // Create circle/ellipse as points around the perimeter
+        const steps = 32
+        for (let i = 0; i <= steps; i++) {
+          const angle = (i / steps) * Math.PI * 2
+          points.push([cx + r * Math.cos(angle), cy + ry * Math.sin(angle)])
+        }
+      } else if (tagName === 'polygon' || tagName === 'polyline') {
+        const pointsAttr = element.getAttribute('points')
+        if (pointsAttr) {
+          const coords = pointsAttr.trim().split(/[\s,]+/).filter(s => s).map(Number)
+          for (let i = 0; i < coords.length; i += 2) {
+            if (i + 1 < coords.length && !isNaN(coords[i]) && !isNaN(coords[i + 1])) {
+              points.push([coords[i], coords[i + 1]])
+            }
+          }
+          // Close polygon if it's a polygon (not polyline)
+          if (tagName === 'polygon' && points.length > 0) {
+            points.push([points[0][0], points[0][1]])
           }
         }
-        // Close polygon if it's a polygon (not polyline)
-        if (tagName === 'polygon' && points.length > 0) {
-          points.push([points[0][0], points[0][1]])
-        }
+      } else if (tagName === 'line') {
+        const x1 = parseFloat(element.getAttribute('x1') || 0)
+        const y1 = parseFloat(element.getAttribute('y1') || 0)
+        const x2 = parseFloat(element.getAttribute('x2') || 0)
+        const y2 = parseFloat(element.getAttribute('y2') || 0)
+        // Skip if any values are NaN
+        if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) return []
+        points.push([x1, y1])
+        points.push([x2, y2])
       }
-    } else if (tagName === 'line') {
-      const x1 = parseFloat(element.getAttribute('x1') || 0)
-      const y1 = parseFloat(element.getAttribute('y1') || 0)
-      const x2 = parseFloat(element.getAttribute('x2') || 0)
-      const y2 = parseFloat(element.getAttribute('y2') || 0)
-      points.push([x1, y1])
-      points.push([x2, y2])
+    } catch (err) {
+      console.error('Error parsing shape:', tagName, err)
+      return []
     }
 
     // Normalize to 0-1 range based on viewBox (matching parseSVGPath behavior)
     if (points.length > 0 && svgWidth > 0 && svgHeight > 0) {
-      return points.map(p => [
-        (p[0] - vb[0]) / svgWidth,
-        (p[1] - vb[1]) / svgHeight
-      ])
+      return points
+        .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
+        .map(p => [
+          (p[0] - vb[0]) / svgWidth,
+          (p[1] - vb[1]) / svgHeight
+        ])
+        .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
     }
-    return points
+    return []
   }
 
   // Handle SVG auto-route upload

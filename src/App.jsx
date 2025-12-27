@@ -11,6 +11,11 @@ L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
   iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+  iconSize: [13, 21], // 50% of default (26, 42)
+  iconAnchor: [13, 21],
+  popupAnchor: [0, -21],
+  shadowSize: [20, 20],
+  shadowAnchor: [4, 20]
 })
 
 function MapClickHandler({ onMapClick }) {
@@ -63,6 +68,8 @@ function App() {
   const [targetDistance, setTargetDistance] = useState(5.0)
   const [isProcessingSVG, setIsProcessingSVG] = useState(false)
   const mapRef = useRef(null)
+  const pngFileInputRef = useRef(null)
+  const svgFileInputRef = useRef(null)
 
   // Get OSRM route between two points
   const getOSRMRoute = useCallback(async (start, end) => {
@@ -949,12 +956,33 @@ function App() {
                       Reference Overlay (PNG)
                       <Tooltip content="Use this to upload a reference image or sketch. PNGs support transparency, allowing you to see the map underneath so you can manually trace your route." />
                     </label>
-                    <input
-                      type="file"
-                      accept="image/png"
-                      onChange={handlePNGUpload}
-                      className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        ref={pngFileInputRef}
+                        type="file"
+                        accept="image/png"
+                        onChange={handlePNGUpload}
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => pngFileInputRef.current?.click()}
+                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+                      >
+                        {referenceOverlay ? 'Re-upload PNG' : 'Upload PNG'}
+                      </button>
+                      {referenceOverlay && (
+                        <button
+                          onClick={() => {
+                            setReferenceOverlay(null)
+                            setReferenceBounds(null)
+                            setReferenceAspectRatio(null)
+                          }}
+                          className="px-4 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
                     {referenceOverlay && (
                       <div className="flex items-center gap-2">
                         <label className="text-sm text-gray-600">Opacity:</label>
@@ -968,16 +996,6 @@ function App() {
                           className="flex-1"
                         />
                         <span className="text-sm text-gray-600 w-12">{Math.round(referenceOpacity * 100)}%</span>
-                        <button
-                          onClick={() => {
-                            setReferenceOverlay(null)
-                            setReferenceBounds(null)
-                            setReferenceAspectRatio(null)
-                          }}
-                          className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600"
-                        >
-                          Remove
-                        </button>
                       </div>
                     )}
                   </div>
@@ -988,13 +1006,22 @@ function App() {
                       Auto-Route Generator (SVG)
                       <Tooltip content="Use this for instant route generation. SVGs contain mathematical paths that can be automatically converted into GPS coordinates." />
                     </label>
-                    <input
-                      type="file"
-                      accept="image/svg+xml,.svg"
-                      onChange={handleSVGUpload}
-                      disabled={isProcessingSVG}
-                      className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        ref={svgFileInputRef}
+                        type="file"
+                        accept="image/svg+xml,.svg"
+                        onChange={handleSVGUpload}
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => svgFileInputRef.current?.click()}
+                        disabled={isProcessingSVG}
+                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isProcessingSVG ? 'Processing...' : 'Upload SVG'}
+                      </button>
+                    </div>
                     {isProcessingSVG && (
                       <p className="text-sm text-indigo-600">Processing SVG...</p>
                     )}

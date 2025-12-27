@@ -590,28 +590,123 @@ function App() {
           const bounds = mapRef.current.getBounds()
           let mapPoints = svgToMapCoordinates(allPoints, bounds)
 
-          // Calculate actual distance and scale to target distance
-          const actualDistance = calculateRouteDistance(mapPoints)
+          console.log('Initial map points:', mapPoints.length)
+
+          // Reduce number of points for OSRM waypoint limit
+          const MAX_WAYPOINTS = 50
+          if (mapPoints.length > MAX_WAYPOINTS) {
+            console.log(`Reducing ${mapPoints.length} points to ${MAX_WAYPOINTS} waypoints`)
+            const step = Math.floor(mapPoints.length / MAX_WAYPOINTS)
+            const sampledPoints = []
+            for (let i = 0; i < mapPoints.length; i += step) {
+              sampledPoints.push(mapPoints[i])
+            }
+            // Always include the last point
+            if (sampledPoints[sampledPoints.length - 1] !== mapPoints[mapPoints.length - 1]) {
+              sampledPoints.push(mapPoints[mapPoints.length - 1])
+            }
+            mapPoints = sampledPoints
+            console.log(`Sampled to ${mapPoints.length} waypoints`)
+          }
+
+          // Snap to roads using OSRM
+          console.log('Snapping route to roads...')
+          const roadSnappedPoints = []
+          
+          for (let i = 0; i < mapPoints.length - 1; i++) {
+            const start = mapPoints[i]
+            const end = mapPoints[i + 1]
+            
+            try {
+              const routeSegment = await getOSRMRoute(start, end)
+              if (routeSegment && routeSegment.length > 0) {
+                // Add all points from this segment except the last (to avoid duplicates)
+                if (i === 0) {
+                  roadSnappedPoints.push(...routeSegment)
+                } else {
+                  roadSnappedPoints.push(...routeSegment.slice(1))
+                }
+              } else {
+                // If OSRM fails, fall back to straight line
+                if (i === 0) roadSnappedPoints.push(start)
+                roadSnappedPoints.push(end)
+              }
+            } catch (error) {
+              console.warn(`Failed to route segment ${i} to ${i+1}:`, error)
+              // Fall back to straight line
+              if (i === 0) roadSnappedPoints.push(start)
+              roadSnappedPoints.push(end)
+            }
+            
+            // Show progress
+            if ((i + 1) % 10 === 0 || i === mapPoints.length - 2) {
+              console.log(`Processed ${i + 1}/${mapPoints.length - 1} segments`)
+            }
+          }
+
+          console.log('Road-snapped points:', roadSnappedPoints.length)
+
+          // Use road-snapped points if available, otherwise fall back to direct points
+          let finalPoints = roadSnappedPoints.length > 0 ? roadSnappedPoints : mapPoints
+
+          // Calculate actual distance and scale to target distance if specified
+          const actualDistance = calculateRouteDistance(finalPoints)
           if (actualDistance > 0 && targetDistance > 0) {
             const scaleFactor = targetDistance / actualDistance
-            const centerLat = mapPoints.reduce((sum, p) => sum + p[0], 0) / mapPoints.length
-            const centerLng = mapPoints.reduce((sum, p) => sum + p[1], 0) / mapPoints.length
+            const centerLat = finalPoints.reduce((sum, p) => sum + p[0], 0) / finalPoints.length
+            const centerLng = finalPoints.reduce((sum, p) => sum + p[1], 0) / finalPoints.length
             
-            mapPoints = mapPoints.map((point) => {
+            console.log(`Scaling route from ${actualDistance.toFixed(2)} miles to ${targetDistance} miles (factor: ${scaleFactor.toFixed(2)})`)
+            
+            const scaledPoints = finalPoints.map((point) => {
               const deltaLat = (point[0] - centerLat) * scaleFactor
               const deltaLng = (point[1] - centerLng) * scaleFactor
               return [centerLat + deltaLat, centerLng + deltaLng]
             })
+
+            // Re-snap scaled route to roads with fewer waypoints
+            console.log('Re-snapping scaled route to roads...')
+            const scaledWaypoints = []
+            const waypointStep = Math.max(1, Math.floor(scaledPoints.length / 30))
+            for (let i = 0; i < scaledPoints.length; i += waypointStep) {
+              scaledWaypoints.push(scaledPoints[i])
+            }
+            if (scaledWaypoints[scaledWaypoints.length - 1] !== scaledPoints[scaledPoints.length - 1]) {
+              scaledWaypoints.push(scaledPoints[scaledPoints.length - 1])
+            }
+
+            const scaledRoadPoints = []
+            for (let i = 0; i < scaledWaypoints.length - 1; i++) {
+              try {
+                const routeSegment = await getOSRMRoute(scaledWaypoints[i], scaledWaypoints[i + 1])
+                if (routeSegment && routeSegment.length > 0) {
+                  if (i === 0) {
+                    scaledRoadPoints.push(...routeSegment)
+                  } else {
+                    scaledRoadPoints.push(...routeSegment.slice(1))
+                  }
+                } else {
+                  if (i === 0) scaledRoadPoints.push(scaledWaypoints[i])
+                  scaledRoadPoints.push(scaledWaypoints[i + 1])
+                }
+              } catch (error) {
+                console.warn(`Failed to route scaled segment ${i}:`, error)
+                if (i === 0) scaledRoadPoints.push(scaledWaypoints[i])
+                scaledRoadPoints.push(scaledWaypoints[i + 1])
+              }
+            }
+
+            finalPoints = scaledRoadPoints.length > 0 ? scaledRoadPoints : scaledPoints
           }
 
           // Set the points
-          setPoints(mapPoints)
+          setPoints(finalPoints)
 
           // Fit map to route
-          if (mapPoints.length > 0) {
-            const firstPoint = mapPoints[0]
+          if (finalPoints.length > 0) {
+            const firstPoint = finalPoints[0]
             const routeBounds = L.latLngBounds([firstPoint, firstPoint])
-            mapPoints.forEach(point => routeBounds.extend(point))
+            finalPoints.forEach(point => routeBounds.extend(point))
             
             setTimeout(() => {
               if (mapRef.current) {
@@ -620,7 +715,8 @@ function App() {
             }, 100)
           }
 
-          alert(`Route generated from SVG! Created ${mapPoints.length} points for ${targetDistance.toFixed(1)} miles.`)
+          const finalDistance = calculateRouteDistance(finalPoints)
+          alert(`Route generated from SVG! Created ${finalPoints.length} points for ${finalDistance.toFixed(1)} miles (snapped to roads).`)
         } catch (error) {
           console.error('Error processing SVG:', error)
           console.error('SVG content preview:', event.target.result.substring(0, 500))

@@ -332,6 +332,73 @@ function App() {
     }
   }
 
+  // Convert SVG shape elements to normalized points (0-1 range)
+  const shapeToPoints = (element, viewBox) => {
+    const vb = viewBox ? viewBox.split(/\s+|,/).map(Number) : [0, 0, 100, 100]
+    const svgWidth = vb[2] - vb[0] || 100
+    const svgHeight = vb[3] - vb[1] || 100
+    const tagName = element.tagName.toLowerCase()
+    const points = []
+
+    if (tagName === 'rect') {
+      const x = parseFloat(element.getAttribute('x') || 0)
+      const y = parseFloat(element.getAttribute('y') || 0)
+      const width = parseFloat(element.getAttribute('width') || 0)
+      const height = parseFloat(element.getAttribute('height') || 0)
+      // Create rectangle as 4 corners
+      points.push([x, y])
+      points.push([x + width, y])
+      points.push([x + width, y + height])
+      points.push([x, y + height])
+      points.push([x, y]) // Close the rectangle
+    } else if (tagName === 'circle' || tagName === 'ellipse') {
+      const cx = parseFloat(element.getAttribute('cx') || 0)
+      const cy = parseFloat(element.getAttribute('cy') || 0)
+      const r = tagName === 'circle' 
+        ? parseFloat(element.getAttribute('r') || 0)
+        : parseFloat(element.getAttribute('rx') || 0)
+      const ry = tagName === 'ellipse'
+        ? parseFloat(element.getAttribute('ry') || r)
+        : r
+      // Create circle/ellipse as points around the perimeter
+      const steps = 32
+      for (let i = 0; i <= steps; i++) {
+        const angle = (i / steps) * Math.PI * 2
+        points.push([cx + r * Math.cos(angle), cy + ry * Math.sin(angle)])
+      }
+    } else if (tagName === 'polygon' || tagName === 'polyline') {
+      const pointsAttr = element.getAttribute('points')
+      if (pointsAttr) {
+        const coords = pointsAttr.trim().split(/[\s,]+/).filter(s => s).map(Number)
+        for (let i = 0; i < coords.length; i += 2) {
+          if (i + 1 < coords.length) {
+            points.push([coords[i], coords[i + 1]])
+          }
+        }
+        // Close polygon if it's a polygon (not polyline)
+        if (tagName === 'polygon' && points.length > 0) {
+          points.push([points[0][0], points[0][1]])
+        }
+      }
+    } else if (tagName === 'line') {
+      const x1 = parseFloat(element.getAttribute('x1') || 0)
+      const y1 = parseFloat(element.getAttribute('y1') || 0)
+      const x2 = parseFloat(element.getAttribute('x2') || 0)
+      const y2 = parseFloat(element.getAttribute('y2') || 0)
+      points.push([x1, y1])
+      points.push([x2, y2])
+    }
+
+    // Normalize to 0-1 range based on viewBox (matching parseSVGPath behavior)
+    if (points.length > 0 && svgWidth > 0 && svgHeight > 0) {
+      return points.map(p => [
+        (p[0] - vb[0]) / svgWidth,
+        (p[1] - vb[1]) / svgHeight
+      ])
+    }
+    return points
+  }
+
   // Handle SVG auto-route upload
   const handleSVGUpload = async (e) => {
     const file = e.target.files[0]
@@ -348,20 +415,32 @@ function App() {
           const svgElement = svgDoc.querySelector('svg')
           
           if (!svgElement) {
-            throw new Error('Invalid SVG file')
+            throw new Error('Invalid SVG file - no <svg> element found')
           }
 
-          const viewBox = svgElement.getAttribute('viewBox') || svgElement.getAttribute('viewbox')
+          const viewBox = svgElement.getAttribute('viewBox') || svgElement.getAttribute('viewbox') || 
+                         `0 0 ${svgElement.getAttribute('width') || 100} ${svgElement.getAttribute('height') || 100}`
+
+          // Get all drawable elements
           const paths = svgElement.querySelectorAll('path')
+          const rects = svgElement.querySelectorAll('rect')
+          const circles = svgElement.querySelectorAll('circle, ellipse')
+          const polygons = svgElement.querySelectorAll('polygon, polyline')
+          const lines = svgElement.querySelectorAll('line')
+
+          // Check if we found any elements
+          const totalElements = paths.length + rects.length + circles.length + polygons.length + lines.length
           
-          if (paths.length === 0) {
-            alert('No paths found in SVG. Please ensure your SVG contains <path> elements.')
+          if (totalElements === 0) {
+            alert('No drawable elements found in SVG. Please ensure your SVG contains <path>, <rect>, <circle>, <polygon>, or similar elements.')
             setIsProcessingSVG(false)
             return
           }
 
-          // Combine all paths
+          // Combine all elements into points
           let allPoints = []
+          
+          // Process paths
           paths.forEach(path => {
             const pathData = path.getAttribute('d')
             if (pathData) {
@@ -370,8 +449,29 @@ function App() {
             }
           })
 
+          // Process shapes
+          rects.forEach(rect => {
+            const points = shapeToPoints(rect, viewBox)
+            allPoints = [...allPoints, ...points]
+          })
+
+          circles.forEach(circle => {
+            const points = shapeToPoints(circle, viewBox)
+            allPoints = [...allPoints, ...points]
+          })
+
+          polygons.forEach(poly => {
+            const points = shapeToPoints(poly, viewBox)
+            allPoints = [...allPoints, ...points]
+          })
+
+          lines.forEach(line => {
+            const points = shapeToPoints(line, viewBox)
+            allPoints = [...allPoints, ...points]
+          })
+
           if (allPoints.length === 0) {
-            alert('Could not extract points from SVG paths.')
+            alert('Could not extract points from SVG elements.')
             setIsProcessingSVG(false)
             return
           }

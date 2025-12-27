@@ -8,9 +8,13 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
   const overlayRef = useRef(null)
   const markersRef = useRef([])
   const groupRef = useRef(null)
+  const dragStartBoundsRef = useRef(null)
+  const dragStartCenterRef = useRef(null)
+  const isDraggingRef = useRef(false)
 
   useEffect(() => {
     if (!bounds || !map) return
+    if (isDraggingRef.current) return // Don't recreate markers during drag
 
     // Clean up previous markers
     if (groupRef.current) {
@@ -50,35 +54,50 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         zIndexOffset: 1000
       })
 
+      marker.on('dragstart', () => {
+        isDraggingRef.current = true
+        dragStartBoundsRef.current = bounds
+        dragStartCenterRef.current = { lat: centerLat, lng: centerLng }
+      })
+
       marker.on('drag', () => {
-        if (!aspectRatio) return
+        if (!aspectRatio || !dragStartBoundsRef.current) return
         
         const draggedPos = marker.getLatLng()
-        const currentCenter = { lat: centerLat, lng: centerLng }
+        const startCenter = dragStartCenterRef.current
+        const startBounds = dragStartBoundsRef.current
+        const startHeight = startBounds[1][0] - startBounds[0][0]
+        const startWidth = startBounds[1][1] - startBounds[0][1]
         
-        // Calculate distance from center
-        const deltaLat = draggedPos.lat - currentCenter.lat
-        const deltaLng = draggedPos.lng - currentCenter.lng
+        // Calculate distance from original center
+        const deltaLat = draggedPos.lat - startCenter.lat
+        const deltaLng = draggedPos.lng - startCenter.lng
         
         // Calculate diagonal distance from center
         const diagonalDistance = Math.sqrt(deltaLat * deltaLat + deltaLng * deltaLng)
-        const currentDiagonal = Math.sqrt((currentHeight / 2) ** 2 + (currentWidth / 2) ** 2)
+        const startDiagonal = Math.sqrt((startHeight / 2) ** 2 + (startWidth / 2) ** 2)
         
         // Scale factor based on diagonal distance (maintains aspect ratio)
-        const scaleFactor = currentDiagonal > 0 ? diagonalDistance / currentDiagonal : 1
+        const scaleFactor = startDiagonal > 0 ? diagonalDistance / startDiagonal : 1
         
         // Calculate new dimensions maintaining aspect ratio
-        const newHeight = Math.max(currentHeight * scaleFactor, 0.0001)
+        const newHeight = Math.max(startHeight * scaleFactor, 0.0001)
         const newWidth = newHeight * aspectRatio
         
         const newBounds = [
-          [currentCenter.lat - newHeight / 2, currentCenter.lng - newWidth / 2],
-          [currentCenter.lat + newHeight / 2, currentCenter.lng + newWidth / 2]
+          [startCenter.lat - newHeight / 2, startCenter.lng - newWidth / 2],
+          [startCenter.lat + newHeight / 2, startCenter.lng + newWidth / 2]
         ]
         
         if (onBoundsChange && newHeight > 0.0001 && newWidth > 0.0001) {
           onBoundsChange(newBounds)
         }
+      })
+
+      marker.on('dragend', () => {
+        isDraggingRef.current = false
+        dragStartBoundsRef.current = null
+        dragStartCenterRef.current = null
       })
 
       marker.addTo(groupRef.current)
@@ -137,25 +156,61 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         zIndexOffset: 1000
       })
 
+      marker.on('dragstart', () => {
+        isDraggingRef.current = true
+        dragStartBoundsRef.current = bounds
+        dragStartCenterRef.current = { lat: centerLat, lng: centerLng }
+      })
+
       marker.on('drag', () => {
+        if (!dragStartBoundsRef.current) return
+        
         const draggedPos = marker.getLatLng()
-        const handler = edgeHandlers[index]
+        const startBounds = dragStartBoundsRef.current
         
         if (index < 2) {
           // West/East - constrain to horizontal movement
           const newLng = draggedPos.lng
-          const newBounds = handler(newLng)
+          let newBounds
+          if (index === 0) { // West
+            newBounds = [
+              [startBounds[0][0], newLng],
+              [startBounds[1][0], startBounds[1][1]]
+            ]
+          } else { // East
+            newBounds = [
+              [startBounds[0][0], startBounds[0][1]],
+              [startBounds[1][0], newLng]
+            ]
+          }
           if (newBounds && newBounds[0][1] < newBounds[1][1]) {
             onBoundsChange(newBounds)
           }
         } else {
           // South/North - constrain to vertical movement
           const newLat = draggedPos.lat
-          const newBounds = handler(newLat)
+          let newBounds
+          if (index === 2) { // South
+            newBounds = [
+              [newLat, startBounds[0][1]],
+              [startBounds[1][0], startBounds[1][1]]
+            ]
+          } else { // North
+            newBounds = [
+              [startBounds[0][0], startBounds[0][1]],
+              [newLat, startBounds[1][1]]
+            ]
+          }
           if (newBounds && newBounds[0][0] < newBounds[1][0]) {
             onBoundsChange(newBounds)
           }
         }
+      })
+
+      marker.on('dragend', () => {
+        isDraggingRef.current = false
+        dragStartBoundsRef.current = null
+        dragStartCenterRef.current = null
       })
 
       marker.addTo(groupRef.current)
@@ -176,15 +231,33 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
       zIndexOffset: 1000
     })
 
+    centerMarker.on('dragstart', () => {
+      isDraggingRef.current = true
+      dragStartBoundsRef.current = bounds
+      dragStartCenterRef.current = { lat: centerLat, lng: centerLng }
+    })
+
     centerMarker.on('drag', () => {
+      if (!dragStartBoundsRef.current) return
+      
       const newCenter = centerMarker.getLatLng()
+      const startBounds = dragStartBoundsRef.current
+      const startHeight = startBounds[1][0] - startBounds[0][0]
+      const startWidth = startBounds[1][1] - startBounds[0][1]
+      
       const newBounds = [
-        [newCenter.lat - currentHeight / 2, newCenter.lng - currentWidth / 2],
-        [newCenter.lat + currentHeight / 2, newCenter.lng + currentWidth / 2]
+        [newCenter.lat - startHeight / 2, newCenter.lng - startWidth / 2],
+        [newCenter.lat + startHeight / 2, newCenter.lng + startWidth / 2]
       ]
       if (onBoundsChange) {
         onBoundsChange(newBounds)
       }
+    })
+
+    centerMarker.on('dragend', () => {
+      isDraggingRef.current = false
+      dragStartBoundsRef.current = null
+      dragStartCenterRef.current = null
     })
 
     centerMarker.addTo(groupRef.current)

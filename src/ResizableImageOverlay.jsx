@@ -34,23 +34,9 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         const leafletBounds = L.latLngBounds(newBounds)
         const overlay = overlayRef.current.leafletElement
         
-        // Update bounds and force redraw for real-time visual feedback
+        // Update bounds directly and force immediate redraw
         overlay._bounds = leafletBounds
-        
-        // Manually update the image element's position and size
-        if (overlay._image) {
-          const sw = map.latLngToLayerPoint(leafletBounds.getSouthWest())
-          const ne = map.latLngToLayerPoint(leafletBounds.getNorthEast())
-          
-          const size = ne.subtract(sw)
-          overlay._image.style.width = Math.abs(size.x) + 'px'
-          overlay._image.style.height = Math.abs(size.y) + 'px'
-          
-          const anchor = sw.add(size.divideBy(2))
-          overlay._image.style.transform = `translate(${anchor.x}px, ${anchor.y}px) translate(-50%, -50%)`
-        } else {
-          overlay._reset()
-        }
+        overlay._update()
         
         // Also update marker positions for handles to follow (but skip the one being dragged)
         if (!skipMarkerUpdate && markersRef.current.length >= 8) {

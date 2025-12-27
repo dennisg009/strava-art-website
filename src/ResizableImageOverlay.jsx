@@ -32,7 +32,36 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
     const updateOverlayBounds = (newBounds) => {
       if (overlayRef.current && overlayRef.current.leafletElement) {
         const leafletBounds = L.latLngBounds(newBounds)
-        overlayRef.current.leafletElement.setBounds(leafletBounds)
+        const overlay = overlayRef.current.leafletElement
+        
+        // Update bounds and redraw immediately for smooth visual feedback
+        overlay.setBounds(leafletBounds)
+        overlay.redraw()
+        
+        // Also update marker positions for handles to follow
+        const newCenterLat = (newBounds[0][0] + newBounds[1][0]) / 2
+        const newCenterLng = (newBounds[0][1] + newBounds[1][1]) / 2
+        const newWidth = newBounds[1][1] - newBounds[0][1]
+        const newHeight = newBounds[1][0] - newBounds[0][0]
+        
+        // Update corner markers
+        if (markersRef.current.length >= 8) {
+          markersRef.current[0].setLatLng([newBounds[0][0], newBounds[0][1]]) // SW
+          markersRef.current[1].setLatLng([newBounds[0][0], newBounds[1][1]]) // NW
+          markersRef.current[2].setLatLng([newBounds[1][0], newBounds[1][1]]) // NE
+          markersRef.current[3].setLatLng([newBounds[1][0], newBounds[0][1]]) // SE
+          
+          // Update edge markers
+          markersRef.current[4].setLatLng([newCenterLat, newBounds[0][1]]) // West
+          markersRef.current[5].setLatLng([newCenterLat, newBounds[1][1]]) // East
+          markersRef.current[6].setLatLng([newBounds[0][0], newCenterLng]) // South
+          markersRef.current[7].setLatLng([newBounds[1][0], newCenterLng]) // North
+          
+          // Update center marker
+          if (markersRef.current.length > 8) {
+            markersRef.current[8].setLatLng([newCenterLat, newCenterLng])
+          }
+        }
       }
     }
 
@@ -43,6 +72,9 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
       [bounds[1][0], bounds[1][1]], // Northeast (index 2)
       [bounds[1][0], bounds[0][1]]  // Southeast (index 3)
     ]
+
+    // Cursor directions: SW->NE, NW->SE, NE->SW, SE->NW
+    const cornerCursors = ['ne-resize', 'se-resize', 'sw-resize', 'nw-resize']
 
     cornerPositions.forEach((corner, index) => {
       const icon = L.divIcon({
@@ -56,6 +88,12 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         draggable: true,
         zIndexOffset: 1000
       })
+      
+      // Set cursor style after marker is added to map
+      setTimeout(() => {
+        const el = marker.getElement()
+        if (el) el.style.cursor = cornerCursors[index]
+      }, 0)
 
       marker.on('dragstart', () => {
         dragStartBoundsRef.current = bounds
@@ -141,11 +179,16 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
       [bounds[1][0], centerLng]  // North (index 7)
     ]
 
+    // Cursor directions: West, East (horizontal), South, North (vertical)
+    const edgeCursors = ['ew-resize', 'ew-resize', 'ns-resize', 'ns-resize']
+    
     edgePositions.forEach((edge, index) => {
+      // Index 0=West, 1=East (horizontal - tall rectangle), 2=South, 3=North (vertical - wide rectangle)
+      const isHorizontal = index < 2
       const icon = L.divIcon({
         className: 'resize-handle-edge',
-        iconSize: index < 2 ? [8, 20] : [20, 8],
-        iconAnchor: index < 2 ? [4, 10] : [10, 4]
+        iconSize: isHorizontal ? [8, 20] : [20, 8],
+        iconAnchor: isHorizontal ? [4, 10] : [10, 4]
       })
 
       const marker = L.marker(edge, {
@@ -153,6 +196,12 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         draggable: true,
         zIndexOffset: 1000
       })
+      
+      // Set cursor style after marker is added to map
+      setTimeout(() => {
+        const el = marker.getElement()
+        if (el) el.style.cursor = edgeCursors[index]
+      }, 0)
 
       marker.on('dragstart', () => {
         dragStartBoundsRef.current = bounds

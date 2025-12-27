@@ -50,7 +50,7 @@ function App() {
   const [imageOpacity, setImageOpacity] = useState(0.5)
   const [imageBounds, setImageBounds] = useState(null)
   const [snapToRoads, setSnapToRoads] = useState(false)
-  const [mapCenter, setMapCenter] = useState([40.7128, -74.0060])
+  const [mapCenter, setMapCenter] = useState([37.7749, -122.4194]) // San Francisco
   const [mapReady, setMapReady] = useState(false)
   const [isRouting, setIsRouting] = useState(false)
   const [isProcessingImage, setIsProcessingImage] = useState(false)

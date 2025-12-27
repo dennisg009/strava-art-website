@@ -11,3 +11,31 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Resizable image overlay handles */
+.resize-handle {
+  background-color: #3b82f6;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: nwse-resize;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.resize-handle:hover {
+  background-color: #2563eb;
+  transform: scale(1.2);
+}
+
+.drag-handle {
+  background-color: #10b981;
+  border: 2px solid white;
+  border-radius: 50%;
+  cursor: move;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.drag-handle:hover {
+  background-color: #059669;
+  transform: scale(1.2);
+}
+
+

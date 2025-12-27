@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { MapContainer, TileLayer, Marker, Polyline, ImageOverlay, useMapEvents, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { Tooltip } from './Tooltip'
+import ResizableImageOverlay from './ResizableImageOverlay'
 
 // Fix for default marker icons in React
 delete L.Icon.Default.prototype._getIconUrl
@@ -54,6 +56,11 @@ function App() {
   const [isProcessingImage, setIsProcessingImage] = useState(false)
   const [showMileagePrompt, setShowMileagePrompt] = useState(false)
   const [pendingImage, setPendingImage] = useState(null)
+  const [referenceOverlay, setReferenceOverlay] = useState(null)
+  const [referenceBounds, setReferenceBounds] = useState(null)
+  const [referenceOpacity, setReferenceOpacity] = useState(0.5)
+  const [targetDistance, setTargetDistance] = useState(5.0)
+  const [isProcessingSVG, setIsProcessingSVG] = useState(false)
   const mapRef = useRef(null)
 
   // Get OSRM route between two points
@@ -197,6 +204,229 @@ function App() {
       totalDistance += calculateDistance(routePoints[i - 1], routePoints[i])
     }
     return totalDistance
+  }
+
+  // Parse SVG path data and convert to coordinates
+  const parseSVGPath = (pathData, viewBox) => {
+    const commands = pathData.match(/[MmLlHhVvCcSsQqTtAaZz][^MmLlHhVvCcSsQqTtAaZz]*/g) || []
+    const points = []
+    let currentX = 0
+    let currentY = 0
+    let startX = 0
+    let startY = 0
+
+    // Parse viewBox to get SVG dimensions
+    const vb = viewBox ? viewBox.split(/\s+|,/).map(Number) : [0, 0, 100, 100]
+    const svgWidth = vb[2] - vb[0]
+    const svgHeight = vb[3] - vb[1]
+
+    commands.forEach(cmd => {
+      const command = cmd[0]
+      const coords = cmd.slice(1).trim().split(/[\s,]+/).filter(s => s).map(Number)
+
+      if (command === 'M' || command === 'm') {
+        if (command === 'm') {
+          currentX += coords[0]
+          currentY += coords[1]
+        } else {
+          currentX = coords[0]
+          currentY = coords[1]
+        }
+        startX = currentX
+        startY = currentY
+        points.push([currentX, currentY])
+      } else if (command === 'L' || command === 'l') {
+        for (let i = 0; i < coords.length; i += 2) {
+          if (command === 'l') {
+            currentX += coords[i]
+            currentY += coords[i + 1]
+          } else {
+            currentX = coords[i]
+            currentY = coords[i + 1]
+          }
+          points.push([currentX, currentY])
+        }
+      } else if (command === 'H' || command === 'h') {
+        coords.forEach(x => {
+          currentX = command === 'h' ? currentX + x : x
+          points.push([currentX, currentY])
+        })
+      } else if (command === 'V' || command === 'v') {
+        coords.forEach(y => {
+          currentY = command === 'v' ? currentY + y : y
+          points.push([currentX, currentY])
+        })
+      } else if (command === 'C' || command === 'c') {
+        // Cubic bezier - approximate with line segments
+        for (let i = 0; i < coords.length; i += 6) {
+          const x1 = command === 'c' ? currentX + coords[i] : coords[i]
+          const y1 = command === 'c' ? currentY + coords[i + 1] : coords[i + 1]
+          const x2 = command === 'c' ? currentX + coords[i + 2] : coords[i + 2]
+          const y2 = command === 'c' ? currentY + coords[i + 3] : coords[i + 3]
+          const x3 = command === 'c' ? currentX + coords[i + 4] : coords[i + 4]
+          const y3 = command === 'c' ? currentY + coords[i + 5] : coords[i + 5]
+          
+          // Sample bezier curve
+          for (let t = 0.1; t <= 1; t += 0.1) {
+            const x = Math.pow(1 - t, 3) * currentX + 3 * Math.pow(1 - t, 2) * t * x1 + 3 * (1 - t) * Math.pow(t, 2) * x2 + Math.pow(t, 3) * x3
+            const y = Math.pow(1 - t, 3) * currentY + 3 * Math.pow(1 - t, 2) * t * y1 + 3 * (1 - t) * Math.pow(t, 2) * y2 + Math.pow(t, 3) * y3
+            points.push([x, y])
+          }
+          currentX = x3
+          currentY = y3
+        }
+      } else if (command === 'Z' || command === 'z') {
+        // Close path
+        if (points.length > 0 && (currentX !== startX || currentY !== startY)) {
+          points.push([startX, startY])
+        }
+      }
+    })
+
+    // Normalize points to 0-1 range
+    if (svgWidth > 0 && svgHeight > 0) {
+      return points.map(p => [
+        (p[0] - vb[0]) / svgWidth,
+        (p[1] - vb[1]) / svgHeight
+      ])
+    }
+    return points
+  }
+
+  // Convert SVG coordinates to map coordinates
+  const svgToMapCoordinates = (svgPoints, bounds) => {
+    const center = bounds.getCenter()
+    const ne = bounds.getNorthEast()
+    const sw = bounds.getSouthWest()
+    
+    return svgPoints.map(point => {
+      const lat = center.lat + (point[1] - 0.5) * (ne.lat - sw.lat)
+      const lng = center.lng + (point[0] - 0.5) * (ne.lng - sw.lng)
+      return [lat, lng]
+    })
+  }
+
+  // Handle PNG reference overlay upload
+  const handlePNGUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        setReferenceOverlay(event.target.result)
+        
+        // Set initial bounds based on current map view
+        if (mapRef.current) {
+          const bounds = mapRef.current.getBounds()
+          const initialBounds = [
+            [bounds.getSouth(), bounds.getWest()],
+            [bounds.getNorth(), bounds.getEast()]
+          ]
+          setReferenceBounds(initialBounds)
+        }
+      }
+      reader.readAsDataURL(file)
+    } else {
+      alert('Please upload a PNG file')
+    }
+  }
+
+  // Handle SVG auto-route upload
+  const handleSVGUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+
+    if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
+      setIsProcessingSVG(true)
+      const reader = new FileReader()
+      reader.onload = async (event) => {
+        try {
+          const svgText = event.target.result
+          const parser = new DOMParser()
+          const svgDoc = parser.parseFromString(svgText, 'image/svg+xml')
+          const svgElement = svgDoc.querySelector('svg')
+          
+          if (!svgElement) {
+            throw new Error('Invalid SVG file')
+          }
+
+          const viewBox = svgElement.getAttribute('viewBox') || svgElement.getAttribute('viewbox')
+          const paths = svgElement.querySelectorAll('path')
+          
+          if (paths.length === 0) {
+            alert('No paths found in SVG. Please ensure your SVG contains <path> elements.')
+            setIsProcessingSVG(false)
+            return
+          }
+
+          // Combine all paths
+          let allPoints = []
+          paths.forEach(path => {
+            const pathData = path.getAttribute('d')
+            if (pathData) {
+              const points = parseSVGPath(pathData, viewBox)
+              allPoints = [...allPoints, ...points]
+            }
+          })
+
+          if (allPoints.length === 0) {
+            alert('Could not extract points from SVG paths.')
+            setIsProcessingSVG(false)
+            return
+          }
+
+          if (!mapRef.current) {
+            setIsProcessingSVG(false)
+            return
+          }
+
+          // Convert to map coordinates
+          const bounds = mapRef.current.getBounds()
+          let mapPoints = svgToMapCoordinates(allPoints, bounds)
+
+          // Calculate actual distance and scale to target distance
+          const actualDistance = calculateRouteDistance(mapPoints)
+          if (actualDistance > 0 && targetDistance > 0) {
+            const scaleFactor = targetDistance / actualDistance
+            const centerLat = mapPoints.reduce((sum, p) => sum + p[0], 0) / mapPoints.length
+            const centerLng = mapPoints.reduce((sum, p) => sum + p[1], 0) / mapPoints.length
+            
+            mapPoints = mapPoints.map((point) => {
+              const deltaLat = (point[0] - centerLat) * scaleFactor
+              const deltaLng = (point[1] - centerLng) * scaleFactor
+              return [centerLat + deltaLat, centerLng + deltaLng]
+            })
+          }
+
+          // Set the points
+          setPoints(mapPoints)
+
+          // Fit map to route
+          if (mapPoints.length > 0) {
+            const firstPoint = mapPoints[0]
+            const routeBounds = L.latLngBounds([firstPoint, firstPoint])
+            mapPoints.forEach(point => routeBounds.extend(point))
+            
+            setTimeout(() => {
+              if (mapRef.current) {
+                mapRef.current.fitBounds(routeBounds, { padding: [50, 50] })
+              }
+            }, 100)
+          }
+
+          alert(`Route generated from SVG! Created ${mapPoints.length} points for ${targetDistance.toFixed(1)} miles.`)
+        } catch (error) {
+          console.error('Error processing SVG:', error)
+          alert('Error processing SVG file. Please ensure it contains valid <path> elements.')
+        } finally {
+          setIsProcessingSVG(false)
+        }
+      }
+      reader.readAsText(file)
+    } else {
+      alert('Please upload an SVG file')
+    }
   }
 
   // Process image to extract route points
@@ -509,43 +739,85 @@ function App() {
               </div>
             </div>
 
-            {/* Image Upload */}
-            <div className="flex flex-col gap-2">
-              <label className="font-semibold text-gray-700">Upload Image</label>
-              <input
-                type="file"
-                accept="image/png,image/*"
-                onChange={handleImageUpload}
-                disabled={isProcessingImage}
-                className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-              />
-              {isProcessingImage && (
-                <p className="text-sm text-indigo-600">Processing image...</p>
-              )}
-              {imageOverlay && !isProcessingImage && (
-                <div className="flex items-center gap-2">
-                  <label className="text-sm text-gray-600">Opacity:</label>
+            {/* Design Tools Sidebar */}
+            <div className="lg:col-span-3 md:col-span-2">
+              <div className="border-2 border-indigo-200 rounded-lg p-4 bg-indigo-50">
+                <h3 className="text-lg font-bold text-indigo-900 mb-4">Design Tools</h3>
+                
+                {/* Target Distance */}
+                <div className="mb-4">
+                  <label className="font-semibold text-gray-700 flex items-center">
+                    Target Distance (Miles)
+                  </label>
                   <input
-                    type="range"
-                    min="0"
-                    max="1"
+                    type="number"
+                    min="0.1"
+                    max="100"
                     step="0.1"
-                    value={imageOpacity}
-                    onChange={(e) => setImageOpacity(parseFloat(e.target.value))}
-                    className="flex-1"
+                    value={targetDistance}
+                    onChange={(e) => setTargetDistance(parseFloat(e.target.value) || 5.0)}
+                    className="w-full mt-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
                   />
-                  <span className="text-sm text-gray-600 w-12">{Math.round(imageOpacity * 100)}%</span>
-                  <button
-                    onClick={() => {
-                      setImageOverlay(null)
-                      setImageBounds(null)
-                    }}
-                    className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600"
-                  >
-                    Remove
-                  </button>
                 </div>
-              )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* PNG Reference Overlay */}
+                  <div className="flex flex-col gap-2">
+                    <label className="font-semibold text-gray-700 flex items-center">
+                      Reference Overlay (PNG)
+                      <Tooltip content="Use this to upload a reference image or sketch. PNGs support transparency, allowing you to see the map underneath so you can manually trace your route." />
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/png"
+                      onChange={handlePNGUpload}
+                      className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
+                    />
+                    {referenceOverlay && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">Opacity:</label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={referenceOpacity}
+                          onChange={(e) => setReferenceOpacity(parseFloat(e.target.value))}
+                          className="flex-1"
+                        />
+                        <span className="text-sm text-gray-600 w-12">{Math.round(referenceOpacity * 100)}%</span>
+                        <button
+                          onClick={() => {
+                            setReferenceOverlay(null)
+                            setReferenceBounds(null)
+                          }}
+                          className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* SVG Auto-Route Generator */}
+                  <div className="flex flex-col gap-2">
+                    <label className="font-semibold text-gray-700 flex items-center">
+                      Auto-Route Generator (SVG)
+                      <Tooltip content="Use this for instant route generation. SVGs contain mathematical paths that can be automatically converted into GPS coordinates." />
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/svg+xml,.svg"
+                      onChange={handleSVGUpload}
+                      disabled={isProcessingSVG}
+                      className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                    />
+                    {isProcessingSVG && (
+                      <p className="text-sm text-indigo-600">Processing SVG...</p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
             
             {/* Mileage Prompt Modal */}
@@ -672,7 +944,17 @@ function App() {
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
             
-            {/* Image Overlay */}
+            {/* Reference Overlay (PNG) */}
+            {referenceOverlay && referenceBounds && (
+              <ResizableImageOverlay
+                url={referenceOverlay}
+                bounds={referenceBounds}
+                opacity={referenceOpacity}
+                onBoundsChange={setReferenceBounds}
+              />
+            )}
+            
+            {/* Legacy Image Overlay (for PNG route generation) */}
             {imageOverlay && imageBounds && (
               <ImageOverlay
                 url={imageOverlay}

@@ -29,23 +29,35 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
     const currentHeight = bounds[1][0] - bounds[0][0]
 
     // Update overlay bounds directly during drag (don't trigger React re-render)
-    const updateOverlayBounds = (newBounds) => {
+    const updateOverlayBounds = (newBounds, skipMarkerUpdate = false) => {
       if (overlayRef.current && overlayRef.current.leafletElement) {
         const leafletBounds = L.latLngBounds(newBounds)
         const overlay = overlayRef.current.leafletElement
         
-        // Update bounds and redraw immediately for smooth visual feedback
-        overlay.setBounds(leafletBounds)
-        overlay.redraw()
+        // Update bounds and force redraw for real-time visual feedback
+        overlay._bounds = leafletBounds
         
-        // Also update marker positions for handles to follow
-        const newCenterLat = (newBounds[0][0] + newBounds[1][0]) / 2
-        const newCenterLng = (newBounds[0][1] + newBounds[1][1]) / 2
-        const newWidth = newBounds[1][1] - newBounds[0][1]
-        const newHeight = newBounds[1][0] - newBounds[0][0]
+        // Manually update the image element's position and size
+        if (overlay._image) {
+          const sw = map.latLngToLayerPoint(leafletBounds.getSouthWest())
+          const ne = map.latLngToLayerPoint(leafletBounds.getNorthEast())
+          
+          const size = ne.subtract(sw)
+          overlay._image.style.width = Math.abs(size.x) + 'px'
+          overlay._image.style.height = Math.abs(size.y) + 'px'
+          
+          const anchor = sw.add(size.divideBy(2))
+          overlay._image.style.transform = `translate(${anchor.x}px, ${anchor.y}px) translate(-50%, -50%)`
+        } else {
+          overlay._reset()
+        }
         
-        // Update corner markers
-        if (markersRef.current.length >= 8) {
+        // Also update marker positions for handles to follow (but skip the one being dragged)
+        if (!skipMarkerUpdate && markersRef.current.length >= 8) {
+          const newCenterLat = (newBounds[0][0] + newBounds[1][0]) / 2
+          const newCenterLng = (newBounds[0][1] + newBounds[1][1]) / 2
+          
+          // Update corner markers
           markersRef.current[0].setLatLng([newBounds[0][0], newBounds[0][1]]) // SW
           markersRef.current[1].setLatLng([newBounds[0][0], newBounds[1][1]]) // NW
           markersRef.current[2].setLatLng([newBounds[1][0], newBounds[1][1]]) // NE
@@ -73,14 +85,16 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
       [bounds[1][0], bounds[0][1]]  // Southeast (index 3)
     ]
 
-    // Cursor directions: SW->NE, NW->SE, NE->SW, SE->NW
+    // Cursor directions and CSS classes: SW->NE, NW->SE, NE->SW, SE->NW
     const cornerCursors = ['ne-resize', 'se-resize', 'sw-resize', 'nw-resize']
+    const cornerClasses = ['resize-handle-corner-sw', 'resize-handle-corner-nw', 'resize-handle-corner-ne', 'resize-handle-corner-se']
 
     cornerPositions.forEach((corner, index) => {
       const icon = L.divIcon({
-        className: 'resize-handle-corner',
+        className: `resize-handle-corner ${cornerClasses[index]}`,
         iconSize: [12, 12],
-        iconAnchor: [6, 6]
+        iconAnchor: [6, 6],
+        html: '' // Empty HTML, we use CSS ::before and ::after
       })
 
       const marker = L.marker(corner, {
@@ -132,7 +146,7 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         ]
         
         if (newHeight > 0.0001 && newWidth > 0.0001) {
-          updateOverlayBounds(newBounds)
+          updateOverlayBounds(newBounds, true) // Skip marker update during corner drag
         }
       })
 
@@ -237,7 +251,7 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         }
         
         if (newBounds && newBounds[0][0] < newBounds[1][0] && newBounds[0][1] < newBounds[1][1]) {
-          updateOverlayBounds(newBounds)
+          updateOverlayBounds(newBounds, true) // Skip marker update during edge drag
         }
       })
 
@@ -310,7 +324,7 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         [newCenter.lat - startHeight / 2, newCenter.lng - startWidth / 2],
         [newCenter.lat + startHeight / 2, newCenter.lng + startWidth / 2]
       ]
-      updateOverlayBounds(newBounds)
+      updateOverlayBounds(newBounds, true) // Skip marker update during center drag
     })
 
     centerMarker.on('dragend', () => {

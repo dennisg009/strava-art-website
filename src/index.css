@@ -16,8 +16,87 @@ body {
   background-color: #3b82f6;
   border: 2px solid white;
   border-radius: 50%;
-  cursor: nwse-resize;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  position: relative;
+  width: 12px;
+  height: 12px;
+}
+
+.resize-handle-corner::before,
+.resize-handle-corner::after {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+/* Top left (NW): arrow up-left (top-left) and arrow down-right (bottom-right) */
+.resize-handle-corner-nw::before {
+  border-width: 0 2px 3px 2px;
+  border-color: transparent transparent white transparent;
+  top: 1px;
+  left: 1px;
+  transform: rotate(-45deg);
+}
+
+.resize-handle-corner-nw::after {
+  border-width: 3px 2px 0 2px;
+  border-color: white transparent transparent transparent;
+  bottom: 1px;
+  right: 1px;
+  transform: rotate(-45deg);
+}
+
+/* Top right (NE): arrow up-right (top-right) and arrow down-left (bottom-left) */
+.resize-handle-corner-ne::before {
+  border-width: 0 2px 3px 2px;
+  border-color: transparent transparent white transparent;
+  top: 1px;
+  right: 1px;
+  transform: rotate(45deg);
+}
+
+.resize-handle-corner-ne::after {
+  border-width: 3px 2px 0 2px;
+  border-color: white transparent transparent transparent;
+  bottom: 1px;
+  left: 1px;
+  transform: rotate(45deg);
+}
+
+/* Bottom left (SW): arrow up-right (top-right) and arrow down-left (bottom-left) */
+.resize-handle-corner-sw::before {
+  border-width: 0 2px 3px 2px;
+  border-color: transparent transparent white transparent;
+  top: 1px;
+  right: 1px;
+  transform: rotate(45deg);
+}
+
+.resize-handle-corner-sw::after {
+  border-width: 3px 2px 0 2px;
+  border-color: white transparent transparent transparent;
+  bottom: 1px;
+  left: 1px;
+  transform: rotate(45deg);
+}
+
+/* Bottom right (SE): arrow up-left (top-left) and arrow down-right (bottom-right) */
+.resize-handle-corner-se::before {
+  border-width: 0 2px 3px 2px;
+  border-color: transparent transparent white transparent;
+  top: 1px;
+  left: 1px;
+  transform: rotate(-45deg);
+}
+
+.resize-handle-corner-se::after {
+  border-width: 3px 2px 0 2px;
+  border-color: white transparent transparent transparent;
+  bottom: 1px;
+  right: 1px;
+  transform: rotate(-45deg);
 }
 
 .resize-handle-corner:hover {

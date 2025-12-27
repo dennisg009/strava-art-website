@@ -440,6 +440,13 @@ function App() {
           const svgText = event.target.result
           const parser = new DOMParser()
           const svgDoc = parser.parseFromString(svgText, 'image/svg+xml')
+          
+          // Check for parsing errors
+          const parserError = svgDoc.querySelector('parsererror')
+          if (parserError) {
+            throw new Error(`SVG parsing error: ${parserError.textContent || 'Invalid SVG format'}`)
+          }
+          
           const svgElement = svgDoc.querySelector('svg')
           
           if (!svgElement) {
@@ -449,18 +456,31 @@ function App() {
           const viewBox = svgElement.getAttribute('viewBox') || svgElement.getAttribute('viewbox') || 
                          `0 0 ${svgElement.getAttribute('width') || 100} ${svgElement.getAttribute('height') || 100}`
 
-          // Get all drawable elements
+          // Get all drawable elements (including those nested in groups)
           const paths = svgElement.querySelectorAll('path')
           const rects = svgElement.querySelectorAll('rect')
           const circles = svgElement.querySelectorAll('circle, ellipse')
           const polygons = svgElement.querySelectorAll('polygon, polyline')
           const lines = svgElement.querySelectorAll('line')
 
+          // Debug: log what we found
+          console.log('SVG elements found:', {
+            paths: paths.length,
+            rects: rects.length,
+            circles: circles.length,
+            polygons: polygons.length,
+            lines: lines.length
+          })
+
           // Check if we found any elements
           const totalElements = paths.length + rects.length + circles.length + polygons.length + lines.length
           
           if (totalElements === 0) {
-            alert('No drawable elements found in SVG. Please ensure your SVG contains <path>, <rect>, <circle>, <polygon>, or similar elements.')
+            // Try to find ANY element to help debug
+            const allElements = svgElement.querySelectorAll('*')
+            const elementTypes = Array.from(allElements).map(el => el.tagName.toLowerCase()).filter((v, i, a) => a.indexOf(v) === i)
+            console.log('No drawable elements found. Available element types:', elementTypes)
+            alert(`No drawable elements found in SVG. Found element types: ${elementTypes.join(', ')}. Please ensure your SVG contains <path>, <rect>, <circle>, <polygon>, or similar elements.`)
             setIsProcessingSVG(false)
             return
           }
@@ -546,7 +566,8 @@ function App() {
           alert(`Route generated from SVG! Created ${mapPoints.length} points for ${targetDistance.toFixed(1)} miles.`)
         } catch (error) {
           console.error('Error processing SVG:', error)
-          alert('Error processing SVG file. Please ensure it contains valid <path> elements.')
+          console.error('SVG content preview:', event.target.result.substring(0, 500))
+          alert(`Error processing SVG file: ${error.message || 'Unknown error'}. Please check the browser console for details.`)
         } finally {
           setIsProcessingSVG(false)
         }

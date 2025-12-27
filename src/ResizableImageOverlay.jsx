@@ -12,24 +12,25 @@ function ResizableImageOverlay({ url, bounds, opacity, onBoundsChange }) {
   useEffect(() => {
     if (!bounds || !map) return
 
-    // Create a layer group for all markers
-    if (!groupRef.current) {
-      groupRef.current = L.layerGroup().addTo(map)
-    } else {
+    // Clean up previous markers
+    if (groupRef.current) {
       groupRef.current.clearLayers()
+      map.removeLayer(groupRef.current)
     }
     
+    // Create a new layer group for all markers
+    groupRef.current = L.layerGroup().addTo(map)
     markersRef.current = []
 
-    // Create corner markers for resizing
-    const corners = [
-      [bounds[0][0], bounds[0][1]], // Southwest
-      [bounds[0][0], bounds[1][1]], // Northwest  
-      [bounds[1][0], bounds[1][1]], // Northeast
-      [bounds[1][0], bounds[0][1]]  // Southeast
+    // Create corner markers for resizing (store indices for reference)
+    const cornerPositions = [
+      [bounds[0][0], bounds[0][1]], // Southwest (index 0)
+      [bounds[0][0], bounds[1][1]], // Northwest (index 1)
+      [bounds[1][0], bounds[1][1]], // Northeast (index 2)
+      [bounds[1][0], bounds[0][1]]  // Southeast (index 3)
     ]
 
-    corners.forEach((corner) => {
+    cornerPositions.forEach((corner, index) => {
       const icon = L.divIcon({
         className: 'resize-handle',
         iconSize: [12, 12],
@@ -43,16 +44,24 @@ function ResizableImageOverlay({ url, bounds, opacity, onBoundsChange }) {
       })
 
       marker.on('drag', () => {
-        if (markersRef.current.length >= 4) {
-          const newCorners = [
-            markersRef.current[0].getLatLng(), // SW
-            markersRef.current[1].getLatLng(), // NW
-            markersRef.current[2].getLatLng(), // NE
-            markersRef.current[3].getLatLng()  // SE
-          ]
+        // Get current positions of all corner markers (they update in real-time)
+        const cornerMarkers = markersRef.current.slice(0, 4)
+        const corners = cornerMarkers.map(m => m.getLatLng())
+        
+        // Calculate new bounds from all corner positions
+        const lats = corners.map(c => c.lat)
+        const lngs = corners.map(c => c.lng)
+        
+        const minLat = Math.min(...lats)
+        const maxLat = Math.max(...lats)
+        const minLng = Math.min(...lngs)
+        const maxLng = Math.max(...lngs)
+        
+        // Only update if bounds are valid
+        if (minLat < maxLat && minLng < maxLng) {
           const newBounds = [
-            [Math.min(newCorners[0].lat, newCorners[3].lat), Math.min(newCorners[0].lng, newCorners[1].lng)],
-            [Math.max(newCorners[1].lat, newCorners[2].lat), Math.max(newCorners[2].lng, newCorners[3].lng)]
+            [minLat, minLng],
+            [maxLat, maxLng]
           ]
           if (onBoundsChange) {
             onBoundsChange(newBounds)

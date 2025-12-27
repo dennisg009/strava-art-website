@@ -314,17 +314,45 @@ function App() {
     if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
       const reader = new FileReader()
       reader.onload = (event) => {
-        setReferenceOverlay(event.target.result)
+        const imageUrl = event.target.result
         
-        // Set initial bounds based on current map view
-        if (mapRef.current) {
-          const bounds = mapRef.current.getBounds()
-          const initialBounds = [
-            [bounds.getSouth(), bounds.getWest()],
-            [bounds.getNorth(), bounds.getEast()]
-          ]
-          setReferenceBounds(initialBounds)
+        // Load image to get dimensions and calculate proper aspect ratio
+        const img = new Image()
+        img.onload = () => {
+          setReferenceOverlay(imageUrl)
+          
+          // Set initial bounds preserving aspect ratio
+          if (mapRef.current) {
+            const mapBounds = mapRef.current.getBounds()
+            const center = mapBounds.getCenter()
+            const mapWidth = mapBounds.getEast() - mapBounds.getWest()
+            const mapHeight = mapBounds.getNorth() - mapBounds.getSouth()
+            
+            // Get image aspect ratio
+            const imageAspectRatio = img.width / img.height
+            const mapAspectRatio = mapWidth / mapHeight
+            
+            let overlayWidth, overlayHeight
+            
+            // Fit image to map view while preserving aspect ratio
+            if (imageAspectRatio > mapAspectRatio) {
+              // Image is wider - fit to map width
+              overlayWidth = mapWidth * 0.8 // Use 80% of map width
+              overlayHeight = overlayWidth / imageAspectRatio
+            } else {
+              // Image is taller - fit to map height
+              overlayHeight = mapHeight * 0.8 // Use 80% of map height
+              overlayWidth = overlayHeight * imageAspectRatio
+            }
+            
+            const initialBounds = [
+              [center.lat - overlayHeight / 2, center.lng - overlayWidth / 2],
+              [center.lat + overlayHeight / 2, center.lng + overlayWidth / 2]
+            ]
+            setReferenceBounds(initialBounds)
+          }
         }
+        img.src = imageUrl
       }
       reader.readAsDataURL(file)
     } else {

@@ -9,9 +9,11 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
   const markersRef = useRef([])
   const groupRef = useRef(null)
   const dragStartBoundsRef = useRef(null)
+  const isDraggingRef = useRef(false)
 
   useEffect(() => {
     if (!bounds || !map) return
+    if (isDraggingRef.current) return // Don't recreate markers during drag
 
     // Clean up previous markers
     if (groupRef.current) {
@@ -132,38 +134,12 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         ]
         
         if (newHeight > 0.0001 && newWidth > 0.0001) {
-          updateOverlayBounds(newBounds, true) // Skip marker update during corner drag
+          updateOverlayBounds(newBounds)
         }
       })
 
       marker.on('dragend', () => {
-        if (!aspectRatio || !dragStartBoundsRef.current) return
-        
-        const draggedPos = marker.getLatLng()
-        const startBounds = dragStartBoundsRef.current
-        const startCenter = {
-          lat: (startBounds[0][0] + startBounds[1][0]) / 2,
-          lng: (startBounds[0][1] + startBounds[1][1]) / 2
-        }
-        const startHeight = startBounds[1][0] - startBounds[0][0]
-        const startWidth = startBounds[1][1] - startBounds[0][1]
-        
-        const deltaLat = draggedPos.lat - startCenter.lat
-        const deltaLng = draggedPos.lng - startCenter.lng
-        const diagonalDistance = Math.sqrt(deltaLat * deltaLat + deltaLng * deltaLng)
-        const startDiagonal = Math.sqrt((startHeight / 2) ** 2 + (startWidth / 2) ** 2)
-        const scaleFactor = startDiagonal > 0 ? diagonalDistance / startDiagonal : 1
-        const newHeight = Math.max(startHeight * scaleFactor, 0.0001)
-        const newWidth = newHeight * aspectRatio
-        
-        const newBounds = [
-          [startCenter.lat - newHeight / 2, startCenter.lng - newWidth / 2],
-          [startCenter.lat + newHeight / 2, startCenter.lng + newWidth / 2]
-        ]
-        
-        if (onBoundsChange && newHeight > 0.0001 && newWidth > 0.0001) {
-          onBoundsChange(newBounds)
-        }
+        isDraggingRef.current = false
         dragStartBoundsRef.current = null
       })
 
@@ -237,7 +213,7 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         }
         
         if (newBounds && newBounds[0][0] < newBounds[1][0] && newBounds[0][1] < newBounds[1][1]) {
-          updateOverlayBounds(newBounds, true) // Skip marker update during edge drag
+          updateOverlayBounds(newBounds)
         }
       })
 
@@ -295,6 +271,7 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
     })
 
     centerMarker.on('dragstart', () => {
+      isDraggingRef.current = true
       dragStartBoundsRef.current = bounds
     })
 
@@ -310,24 +287,11 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
         [newCenter.lat - startHeight / 2, newCenter.lng - startWidth / 2],
         [newCenter.lat + startHeight / 2, newCenter.lng + startWidth / 2]
       ]
-      updateOverlayBounds(newBounds, true) // Skip marker update during center drag
+      updateOverlayBounds(newBounds)
     })
 
     centerMarker.on('dragend', () => {
-      if (!dragStartBoundsRef.current) return
-      
-      const newCenter = centerMarker.getLatLng()
-      const startBounds = dragStartBoundsRef.current
-      const startHeight = startBounds[1][0] - startBounds[0][0]
-      const startWidth = startBounds[1][1] - startBounds[0][1]
-      
-      const newBounds = [
-        [newCenter.lat - startHeight / 2, newCenter.lng - startWidth / 2],
-        [newCenter.lat + startHeight / 2, newCenter.lng + startWidth / 2]
-      ]
-      if (onBoundsChange) {
-        onBoundsChange(newBounds)
-      }
+      isDraggingRef.current = false
       dragStartBoundsRef.current = null
     })
 

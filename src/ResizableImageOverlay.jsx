@@ -30,38 +30,10 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
     const currentWidth = bounds[1][1] - bounds[0][1]
     const currentHeight = bounds[1][0] - bounds[0][0]
 
-    // Update overlay bounds directly during drag (don't trigger React re-render)
-    const updateOverlayBounds = (newBounds, skipMarkerUpdate = false) => {
-      if (overlayRef.current && overlayRef.current.leafletElement) {
-        const leafletBounds = L.latLngBounds(newBounds)
-        const overlay = overlayRef.current.leafletElement
-        
-        // Update bounds directly and force immediate redraw
-        overlay._bounds = leafletBounds
-        overlay._update()
-        
-        // Also update marker positions for handles to follow (but skip the one being dragged)
-        if (!skipMarkerUpdate && markersRef.current.length >= 8) {
-          const newCenterLat = (newBounds[0][0] + newBounds[1][0]) / 2
-          const newCenterLng = (newBounds[0][1] + newBounds[1][1]) / 2
-          
-          // Update corner markers
-          markersRef.current[0].setLatLng([newBounds[0][0], newBounds[0][1]]) // SW
-          markersRef.current[1].setLatLng([newBounds[0][0], newBounds[1][1]]) // NW
-          markersRef.current[2].setLatLng([newBounds[1][0], newBounds[1][1]]) // NE
-          markersRef.current[3].setLatLng([newBounds[1][0], newBounds[0][1]]) // SE
-          
-          // Update edge markers
-          markersRef.current[4].setLatLng([newCenterLat, newBounds[0][1]]) // West
-          markersRef.current[5].setLatLng([newCenterLat, newBounds[1][1]]) // East
-          markersRef.current[6].setLatLng([newBounds[0][0], newCenterLng]) // South
-          markersRef.current[7].setLatLng([newBounds[1][0], newCenterLng]) // North
-          
-          // Update center marker
-          if (markersRef.current.length > 8) {
-            markersRef.current[8].setLatLng([newCenterLat, newCenterLng])
-          }
-        }
+    // Update overlay bounds - update React state for real-time visual feedback
+    const updateOverlayBounds = (newBounds) => {
+      if (onBoundsChange) {
+        onBoundsChange(newBounds)
       }
     }
 

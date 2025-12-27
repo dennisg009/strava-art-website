@@ -59,6 +59,7 @@ function App() {
   const [referenceOverlay, setReferenceOverlay] = useState(null)
   const [referenceBounds, setReferenceBounds] = useState(null)
   const [referenceOpacity, setReferenceOpacity] = useState(0.5)
+  const [referenceAspectRatio, setReferenceAspectRatio] = useState(null)
   const [targetDistance, setTargetDistance] = useState(5.0)
   const [isProcessingSVG, setIsProcessingSVG] = useState(false)
   const mapRef = useRef(null)
@@ -321,6 +322,10 @@ function App() {
         img.onload = () => {
           setReferenceOverlay(imageUrl)
           
+          // Store aspect ratio for use in resize operations
+          const imageAspectRatio = img.width / img.height
+          setReferenceAspectRatio(imageAspectRatio)
+          
           // Set initial bounds preserving aspect ratio
           if (mapRef.current) {
             const mapBounds = mapRef.current.getBounds()
@@ -328,8 +333,6 @@ function App() {
             const mapWidth = mapBounds.getEast() - mapBounds.getWest()
             const mapHeight = mapBounds.getNorth() - mapBounds.getSouth()
             
-            // Get image aspect ratio
-            const imageAspectRatio = img.width / img.height
             const mapAspectRatio = mapWidth / mapHeight
             
             let overlayWidth, overlayHeight
@@ -969,6 +972,7 @@ function App() {
                           onClick={() => {
                             setReferenceOverlay(null)
                             setReferenceBounds(null)
+                            setReferenceAspectRatio(null)
                           }}
                           className="px-3 py-1 text-sm bg-red-500 text-white rounded hover:bg-red-600"
                         >
@@ -1129,6 +1133,7 @@ function App() {
                 url={referenceOverlay}
                 bounds={referenceBounds}
                 opacity={referenceOpacity}
+                aspectRatio={referenceAspectRatio}
                 onBoundsChange={setReferenceBounds}
               />
             )}

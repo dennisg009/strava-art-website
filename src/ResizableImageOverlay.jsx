@@ -98,6 +98,7 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
       }, 0)
 
       marker.on('dragstart', () => {
+        isDraggingRef.current = true
         dragStartBoundsRef.current = bounds
       })
 
@@ -180,6 +181,7 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
       }, 0)
 
       marker.on('dragstart', () => {
+        isDraggingRef.current = true
         dragStartBoundsRef.current = bounds
       })
 
@@ -218,37 +220,7 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
       })
 
       marker.on('dragend', () => {
-        if (!dragStartBoundsRef.current) return
-        
-        const draggedPos = marker.getLatLng()
-        const startBounds = dragStartBoundsRef.current
-        
-        let newBounds
-        if (index === 0) { // West
-          newBounds = [
-            [startBounds[0][0], draggedPos.lng],
-            [startBounds[1][0], startBounds[1][1]]
-          ]
-        } else if (index === 1) { // East
-          newBounds = [
-            [startBounds[0][0], startBounds[0][1]],
-            [startBounds[1][0], draggedPos.lng]
-          ]
-        } else if (index === 2) { // South
-          newBounds = [
-            [draggedPos.lat, startBounds[0][1]],
-            [startBounds[1][0], startBounds[1][1]]
-          ]
-        } else { // North
-          newBounds = [
-            [startBounds[0][0], startBounds[0][1]],
-            [draggedPos.lat, startBounds[1][1]]
-          ]
-        }
-        
-        if (onBoundsChange && newBounds && newBounds[0][0] < newBounds[1][0] && newBounds[0][1] < newBounds[1][1]) {
-          onBoundsChange(newBounds)
-        }
+        isDraggingRef.current = false
         dragStartBoundsRef.current = null
       })
 

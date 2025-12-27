@@ -488,34 +488,64 @@ function App() {
           // Combine all elements into points
           let allPoints = []
           
-          // Process paths
+          // Process paths (with error handling)
           paths.forEach(path => {
-            const pathData = path.getAttribute('d')
-            if (pathData) {
-              const points = parseSVGPath(pathData, viewBox)
-              allPoints = [...allPoints, ...points]
+            try {
+              const pathData = path.getAttribute('d')
+              if (pathData) {
+                const points = parseSVGPath(pathData, viewBox)
+                if (points && points.length > 0) {
+                  allPoints = [...allPoints, ...points]
+                }
+              }
+            } catch (err) {
+              console.warn('Error processing path:', err)
             }
           })
 
-          // Process shapes
+          // Process shapes (with error handling)
           rects.forEach(rect => {
-            const points = shapeToPoints(rect, viewBox)
-            allPoints = [...allPoints, ...points]
+            try {
+              const points = shapeToPoints(rect, viewBox)
+              if (points && points.length > 0) {
+                allPoints = [...allPoints, ...points]
+              }
+            } catch (err) {
+              console.warn('Error processing rect:', err)
+            }
           })
 
           circles.forEach(circle => {
-            const points = shapeToPoints(circle, viewBox)
-            allPoints = [...allPoints, ...points]
+            try {
+              const points = shapeToPoints(circle, viewBox)
+              if (points && points.length > 0) {
+                allPoints = [...allPoints, ...points]
+              }
+            } catch (err) {
+              console.warn('Error processing circle:', err)
+            }
           })
 
           polygons.forEach(poly => {
-            const points = shapeToPoints(poly, viewBox)
-            allPoints = [...allPoints, ...points]
+            try {
+              const points = shapeToPoints(poly, viewBox)
+              if (points && points.length > 0) {
+                allPoints = [...allPoints, ...points]
+              }
+            } catch (err) {
+              console.warn('Error processing polygon:', err)
+            }
           })
 
           lines.forEach(line => {
-            const points = shapeToPoints(line, viewBox)
-            allPoints = [...allPoints, ...points]
+            try {
+              const points = shapeToPoints(line, viewBox)
+              if (points && points.length > 0) {
+                allPoints = [...allPoints, ...points]
+              }
+            } catch (err) {
+              console.warn('Error processing line:', err)
+            }
           })
 
           if (allPoints.length === 0) {

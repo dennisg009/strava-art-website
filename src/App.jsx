@@ -18,10 +18,63 @@ L.Icon.Default.mergeOptions({
   shadowAnchor: [4, 20]
 })
 
-function MapClickHandler({ onMapClick }) {
+function MapClickHandler({ onMapClick, isDrawingMode }) {
   useMapEvents({
-    click: onMapClick,
+    click: (e) => {
+      // Don't add points when in drawing mode
+      if (!isDrawingMode) {
+        onMapClick(e)
+      }
+    },
   })
+  return null
+}
+
+// Drawing handler component for freehand drawing
+function DrawingHandler({ isDrawingMode, onDrawStart, onDrawMove, onDrawEnd }) {
+  const map = useMap()
+  
+  useEffect(() => {
+    if (!isDrawingMode) return
+    
+    let isDrawing = false
+    
+    const handleMouseDown = (e) => {
+      isDrawing = true
+      map.dragging.disable()
+      onDrawStart([e.latlng.lat, e.latlng.lng])
+    }
+    
+    const handleMouseMove = (e) => {
+      if (isDrawing) {
+        onDrawMove([e.latlng.lat, e.latlng.lng])
+      }
+    }
+    
+    const handleMouseUp = () => {
+      if (isDrawing) {
+        isDrawing = false
+        map.dragging.enable()
+        onDrawEnd()
+      }
+    }
+    
+    // Change cursor to crosshair when in drawing mode
+    map.getContainer().style.cursor = 'crosshair'
+    
+    map.on('mousedown', handleMouseDown)
+    map.on('mousemove', handleMouseMove)
+    map.on('mouseup', handleMouseUp)
+    
+    return () => {
+      map.getContainer().style.cursor = ''
+      map.off('mousedown', handleMouseDown)
+      map.off('mousemove', handleMouseMove)
+      map.off('mouseup', handleMouseUp)
+      map.dragging.enable()
+    }
+  }, [isDrawingMode, map, onDrawStart, onDrawMove, onDrawEnd])
+  
   return null
 }
 
@@ -65,8 +118,84 @@ function App() {
   const [referenceBounds, setReferenceBounds] = useState(null)
   const [referenceOpacity, setReferenceOpacity] = useState(0.5)
   const [referenceAspectRatio, setReferenceAspectRatio] = useState(null)
+  // Drawing mode state
+  const [isDrawingMode, setIsDrawingMode] = useState(false)
+  const [drawnLines, setDrawnLines] = useState([]) // Array of completed lines
+  const [currentLine, setCurrentLine] = useState([]) // Line currently being drawn
+  const [undoStack, setUndoStack] = useState([]) // For undo functionality
+  const [redoStack, setRedoStack] = useState([]) // For redo functionality
   const mapRef = useRef(null)
   const pngFileInputRef = useRef(null)
+
+  // Drawing handlers
+  const handleDrawStart = useCallback((point) => {
+    setCurrentLine([point])
+  }, [])
+
+  const handleDrawMove = useCallback((point) => {
+    setCurrentLine(prev => [...prev, point])
+  }, [])
+
+  const handleDrawEnd = useCallback(() => {
+    if (currentLine.length > 1) {
+      // Save to undo stack before adding new line
+      setUndoStack(prev => [...prev, { type: 'add', lines: drawnLines }])
+      setRedoStack([]) // Clear redo stack on new action
+      setDrawnLines(prev => [...prev, currentLine])
+    }
+    setCurrentLine([])
+  }, [currentLine, drawnLines])
+
+  // Delete last drawn line
+  const deleteLastLine = useCallback(() => {
+    if (drawnLines.length === 0) return
+    
+    setUndoStack(prev => [...prev, { type: 'delete', lines: drawnLines }])
+    setRedoStack([])
+    setDrawnLines(prev => prev.slice(0, -1))
+  }, [drawnLines])
+
+  // Undo action
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return
+    
+    const lastAction = undoStack[undoStack.length - 1]
+    setRedoStack(prev => [...prev, { type: 'undo', lines: drawnLines }])
+    setDrawnLines(lastAction.lines)
+    setUndoStack(prev => prev.slice(0, -1))
+  }, [undoStack, drawnLines])
+
+  // Redo action
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0) return
+    
+    const lastRedo = redoStack[redoStack.length - 1]
+    setUndoStack(prev => [...prev, { type: 'redo', lines: drawnLines }])
+    setDrawnLines(lastRedo.lines)
+    setRedoStack(prev => prev.slice(0, -1))
+  }, [redoStack, drawnLines])
+
+  // Clear all drawings
+  const clearAllDrawings = useCallback(() => {
+    if (drawnLines.length === 0) return
+    
+    setUndoStack(prev => [...prev, { type: 'clear', lines: drawnLines }])
+    setRedoStack([])
+    setDrawnLines([])
+  }, [drawnLines])
+
+  // Convert drawings to route points
+  const convertDrawingsToRoute = useCallback(() => {
+    if (drawnLines.length === 0) {
+      alert('No drawings to convert')
+      return
+    }
+    
+    // Flatten all drawn lines into a single route
+    const allPoints = drawnLines.flat()
+    setPoints(allPoints)
+    alert(`Converted ${drawnLines.length} line(s) to route with ${allPoints.length} points`)
+  }, [drawnLines])
 
   // Get OSRM route between two points
   const getOSRMRoute = useCallback(async (start, end) => {
@@ -684,6 +813,90 @@ function App() {
               </div>
             )}
 
+            {/* Drawing Tools */}
+            <div className="lg:col-span-3 md:col-span-2">
+              <div className={`border-2 rounded-lg p-4 ${isDrawingMode ? 'border-red-400 bg-red-50' : 'border-orange-200 bg-orange-50'}`}>
+                <h3 className="text-lg font-bold text-orange-900 mb-4 flex items-center gap-2">
+                  ✏️ Drawing Tools
+                  {isDrawingMode && <span className="text-sm font-normal text-red-600 bg-red-100 px-2 py-1 rounded">Drawing Mode Active</span>}
+                </h3>
+                
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {/* Drawing Mode Toggle */}
+                  <button
+                    onClick={() => setIsDrawingMode(!isDrawingMode)}
+                    className={`px-4 py-3 rounded-lg font-semibold transition-colors ${
+                      isDrawingMode 
+                        ? 'bg-red-500 text-white hover:bg-red-600' 
+                        : 'bg-orange-500 text-white hover:bg-orange-600'
+                    }`}
+                  >
+                    {isDrawingMode ? '⏹ Stop Drawing' : '✏️ Start Drawing'}
+                  </button>
+
+                  {/* Undo Button */}
+                  <button
+                    onClick={handleUndo}
+                    disabled={undoStack.length === 0}
+                    className="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ↩️ Undo
+                  </button>
+
+                  {/* Redo Button */}
+                  <button
+                    onClick={handleRedo}
+                    disabled={redoStack.length === 0}
+                    className="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    ↪️ Redo
+                  </button>
+
+                  {/* Delete Last Line */}
+                  <button
+                    onClick={deleteLastLine}
+                    disabled={drawnLines.length === 0}
+                    className="px-4 py-3 bg-yellow-500 text-white rounded-lg font-semibold hover:bg-yellow-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    🗑️ Delete Last Line
+                  </button>
+
+                  {/* Clear All Drawings */}
+                  <button
+                    onClick={clearAllDrawings}
+                    disabled={drawnLines.length === 0}
+                    className="px-4 py-3 bg-red-400 text-white rounded-lg font-semibold hover:bg-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    🧹 Clear All
+                  </button>
+
+                  {/* Convert to Route */}
+                  <button
+                    onClick={convertDrawingsToRoute}
+                    disabled={drawnLines.length === 0}
+                    className="px-4 py-3 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed md:col-span-2"
+                  >
+                    ✅ Convert to Route ({drawnLines.length} lines)
+                  </button>
+                </div>
+
+                {/* Drawing Info */}
+                {drawnLines.length > 0 && (
+                  <div className="mt-3 text-sm text-gray-600">
+                    <span>Lines drawn: <strong>{drawnLines.length}</strong></span>
+                    <span className="mx-2">|</span>
+                    <span>Total points: <strong>{drawnLines.reduce((sum, line) => sum + line.length, 0)}</strong></span>
+                  </div>
+                )}
+
+                {isDrawingMode && (
+                  <p className="mt-3 text-sm text-orange-700 bg-orange-100 p-2 rounded">
+                    💡 <strong>Tip:</strong> Click and drag on the map to draw freehand. Release to complete a line segment.
+                  </p>
+                )}
+              </div>
+            </div>
+
             {/* Snap to Roads Toggle */}
             <div className="flex flex-col gap-2">
               <label className="font-semibold text-gray-700">Route Options</label>
@@ -785,7 +998,7 @@ function App() {
               <Marker key={index} position={point} />
             ))}
 
-            {/* Polyline */}
+            {/* Route Polyline */}
             {points.length > 1 && (
               <Polyline
                 positions={points}
@@ -795,8 +1008,40 @@ function App() {
               />
             )}
 
+            {/* Drawn Lines */}
+            {drawnLines.map((line, index) => (
+              <Polyline
+                key={`drawn-${index}`}
+                positions={line}
+                color="#ef4444"
+                weight={3}
+                opacity={0.9}
+              />
+            ))}
+
+            {/* Current Drawing Line */}
+            {currentLine.length > 1 && (
+              <Polyline
+                positions={currentLine}
+                color="#f97316"
+                weight={3}
+                opacity={0.8}
+                dashArray="5, 10"
+              />
+            )}
+
             {/* Map Click Handler */}
-            <MapClickHandler onMapClick={handleMapClick} />
+            <MapClickHandler onMapClick={handleMapClick} isDrawingMode={isDrawingMode} />
+
+            {/* Drawing Handler */}
+            {isDrawingMode && (
+              <DrawingHandler
+                isDrawingMode={isDrawingMode}
+                onDrawStart={handleDrawStart}
+                onDrawMove={handleDrawMove}
+                onDrawEnd={handleDrawEnd}
+              />
+            )}
           </MapContainer>
         </div>
 
@@ -815,6 +1060,14 @@ function App() {
             <li className="flex items-start gap-2">
               <span className="text-indigo-600">→</span>
               <span>Upload a transparent PNG image to overlay and trace over</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-orange-500">✏️</span>
+              <span><strong>Drawing Mode:</strong> Click "Start Drawing" then draw freely on the map with your mouse</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-orange-500">↩️</span>
+              <span>Use Undo/Redo to correct mistakes, and "Convert to Route" when done</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-indigo-600">→</span>

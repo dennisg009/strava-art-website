@@ -8,6 +8,8 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
   const overlayRef = useRef(null)
   const markersRef = useRef([])
   const groupRef = useRef(null)
+  const isDraggingImageRef = useRef(false)
+  const dragStartPosRef = useRef(null)
 
   useEffect(() => {
     if (!bounds || !map) return
@@ -279,12 +281,12 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
       markersRef.current.push(marker)
     })
 
-    // Center drag handle
+    // Center drag handle (larger and more visible)
     const center = [centerLat, centerLng]
     const centerIcon = L.divIcon({
       className: 'drag-handle',
-      iconSize: [20, 20],
-      iconAnchor: [10, 10]
+      iconSize: [32, 32],
+      iconAnchor: [16, 16]
     })
 
     const centerMarker = L.marker(center, {
@@ -332,7 +334,114 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
     centerMarker.addTo(groupRef.current)
     markersRef.current.push(centerMarker)
 
+    // Make the entire image overlay draggable
+    const setupImageDragging = () => {
+      if (!overlayRef.current || !overlayRef.current.leafletElement) return
+      
+      const overlay = overlayRef.current.leafletElement
+      const imageElement = overlay.getElement()
+      
+      if (!imageElement) {
+        // If image isn't ready yet, try again in a bit
+        setTimeout(setupImageDragging, 100)
+        return
+      }
+
+      // Make image show move cursor
+      imageElement.style.cursor = 'move'
+      
+      const onMouseDown = (e) => {
+        // Don't drag if clicking on a handle
+        if (e.target.classList.contains('resize-handle-corner') || 
+            e.target.classList.contains('resize-handle-edge') ||
+            e.target.classList.contains('drag-handle')) {
+          return
+        }
+        
+        isDraggingImageRef.current = true
+        dragStartPosRef.current = {
+          mouseX: e.clientX,
+          mouseY: e.clientY,
+          bounds: bounds
+        }
+        imageElement.style.cursor = 'grabbing'
+        e.preventDefault()
+        e.stopPropagation()
+      }
+
+      const onMouseMove = (e) => {
+        if (!isDraggingImageRef.current || !dragStartPosRef.current) return
+        
+        const startBounds = dragStartPosRef.current.bounds
+        const deltaX = e.clientX - dragStartPosRef.current.mouseX
+        const deltaY = e.clientY - dragStartPosRef.current.mouseY
+        
+        // Convert pixel movement to lat/lng movement
+        const point1 = map.latLngToContainerPoint([startBounds[0][0], startBounds[0][1]])
+        const point2 = map.containerPointToLatLng([point1.x + deltaX, point1.y + deltaY])
+        
+        const deltaLat = point2.lat - startBounds[0][0]
+        const deltaLng = point2.lng - startBounds[0][1]
+        
+        const newBounds = [
+          [startBounds[0][0] + deltaLat, startBounds[0][1] + deltaLng],
+          [startBounds[1][0] + deltaLat, startBounds[1][1] + deltaLng]
+        ]
+        
+        updateOverlayBoundsVisually(newBounds)
+        updateMarkerPositions(newBounds)
+        
+        e.preventDefault()
+        e.stopPropagation()
+      }
+
+      const onMouseUp = (e) => {
+        if (!isDraggingImageRef.current || !dragStartPosRef.current) return
+        
+        const startBounds = dragStartPosRef.current.bounds
+        const deltaX = e.clientX - dragStartPosRef.current.mouseX
+        const deltaY = e.clientY - dragStartPosRef.current.mouseY
+        
+        const point1 = map.latLngToContainerPoint([startBounds[0][0], startBounds[0][1]])
+        const point2 = map.containerPointToLatLng([point1.x + deltaX, point1.y + deltaY])
+        
+        const deltaLat = point2.lat - startBounds[0][0]
+        const deltaLng = point2.lng - startBounds[0][1]
+        
+        const newBounds = [
+          [startBounds[0][0] + deltaLat, startBounds[0][1] + deltaLng],
+          [startBounds[1][0] + deltaLat, startBounds[1][1] + deltaLng]
+        ]
+        
+        commitBoundsChange(newBounds)
+        
+        isDraggingImageRef.current = false
+        dragStartPosRef.current = null
+        imageElement.style.cursor = 'move'
+        
+        e.preventDefault()
+        e.stopPropagation()
+      }
+
+      imageElement.addEventListener('mousedown', onMouseDown)
+      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mouseup', onMouseUp)
+      
+      // Store cleanup functions
+      return () => {
+        imageElement.removeEventListener('mousedown', onMouseDown)
+        document.removeEventListener('mousemove', onMouseMove)
+        document.removeEventListener('mouseup', onMouseUp)
+      }
+    }
+
+    // Set up image dragging after a short delay to ensure overlay is rendered
+    const cleanupImageDragging = setupImageDragging()
+
     return () => {
+      if (cleanupImageDragging) {
+        cleanupImageDragging()
+      }
       if (groupRef.current) {
         groupRef.current.clearLayers()
         map.removeLayer(groupRef.current)

@@ -31,49 +31,68 @@ function MapClickHandler({ onMapClick, isDrawingMode }) {
 }
 
 // Drawing handler component for freehand drawing
-function DrawingHandler({ isDrawingMode, onDrawStart, onDrawMove, onDrawEnd }) {
+function DrawingHandler({ isDrawingMode, currentLineRef, onLineComplete, setCurrentLine }) {
   const map = useMap()
+  const isDrawingRef = useRef(false)
   
   useEffect(() => {
-    if (!isDrawingMode) return
-    
-    let isDrawing = false
+    if (!isDrawingMode || !map) return
     
     const handleMouseDown = (e) => {
-      isDrawing = true
+      // Prevent default to stop map dragging
+      L.DomEvent.stop(e)
+      isDrawingRef.current = true
       map.dragging.disable()
-      onDrawStart([e.latlng.lat, e.latlng.lng])
+      
+      // Start new line
+      const point = [e.latlng.lat, e.latlng.lng]
+      currentLineRef.current = [point]
+      setCurrentLine([point])
     }
     
     const handleMouseMove = (e) => {
-      if (isDrawing) {
-        onDrawMove([e.latlng.lat, e.latlng.lng])
-      }
+      if (!isDrawingRef.current) return
+      
+      const point = [e.latlng.lat, e.latlng.lng]
+      currentLineRef.current = [...currentLineRef.current, point]
+      setCurrentLine([...currentLineRef.current])
     }
     
     const handleMouseUp = () => {
-      if (isDrawing) {
-        isDrawing = false
-        map.dragging.enable()
-        onDrawEnd()
+      if (!isDrawingRef.current) return
+      
+      isDrawingRef.current = false
+      map.dragging.enable()
+      
+      // Complete the line if it has enough points
+      if (currentLineRef.current.length > 1) {
+        onLineComplete([...currentLineRef.current])
       }
+      
+      currentLineRef.current = []
+      setCurrentLine([])
     }
     
     // Change cursor to crosshair when in drawing mode
-    map.getContainer().style.cursor = 'crosshair'
+    const container = map.getContainer()
+    container.style.cursor = 'crosshair'
     
     map.on('mousedown', handleMouseDown)
     map.on('mousemove', handleMouseMove)
     map.on('mouseup', handleMouseUp)
+    // Also handle mouse leaving the map
+    map.on('mouseout', handleMouseUp)
     
     return () => {
-      map.getContainer().style.cursor = ''
+      container.style.cursor = ''
       map.off('mousedown', handleMouseDown)
       map.off('mousemove', handleMouseMove)
       map.off('mouseup', handleMouseUp)
+      map.off('mouseout', handleMouseUp)
       map.dragging.enable()
+      isDrawingRef.current = false
     }
-  }, [isDrawingMode, map, onDrawStart, onDrawMove, onDrawEnd])
+  }, [isDrawingMode, map, currentLineRef, onLineComplete, setCurrentLine])
   
   return null
 }
@@ -124,27 +143,21 @@ function App() {
   const [currentLine, setCurrentLine] = useState([]) // Line currently being drawn
   const [undoStack, setUndoStack] = useState([]) // For undo functionality
   const [redoStack, setRedoStack] = useState([]) // For redo functionality
+  const currentLineRef = useRef([]) // Ref for tracking current line during draw
   const mapRef = useRef(null)
   const pngFileInputRef = useRef(null)
 
-  // Drawing handlers
-  const handleDrawStart = useCallback((point) => {
-    setCurrentLine([point])
-  }, [])
-
-  const handleDrawMove = useCallback((point) => {
-    setCurrentLine(prev => [...prev, point])
-  }, [])
-
-  const handleDrawEnd = useCallback(() => {
-    if (currentLine.length > 1) {
-      // Save to undo stack before adding new line
-      setUndoStack(prev => [...prev, { type: 'add', lines: drawnLines }])
-      setRedoStack([]) // Clear redo stack on new action
-      setDrawnLines(prev => [...prev, currentLine])
+  // Handle line completion (called when mouse is released after drawing)
+  const handleLineComplete = useCallback((line) => {
+    if (line && line.length > 1) {
+      setDrawnLines(prev => {
+        // Save current state to undo stack
+        setUndoStack(undoPrev => [...undoPrev, { type: 'add', lines: prev }])
+        setRedoStack([]) // Clear redo stack on new action
+        return [...prev, line]
+      })
     }
-    setCurrentLine([])
-  }, [currentLine, drawnLines])
+  }, [])
 
   // Delete last drawn line
   const deleteLastLine = useCallback(() => {
@@ -1037,9 +1050,9 @@ function App() {
             {isDrawingMode && (
               <DrawingHandler
                 isDrawingMode={isDrawingMode}
-                onDrawStart={handleDrawStart}
-                onDrawMove={handleDrawMove}
-                onDrawEnd={handleDrawEnd}
+                currentLineRef={currentLineRef}
+                onLineComplete={handleLineComplete}
+                setCurrentLine={setCurrentLine}
               />
             )}
           </MapContainer>

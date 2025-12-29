@@ -144,8 +144,17 @@ function App() {
   const [undoStack, setUndoStack] = useState([]) // For undo functionality
   const [redoStack, setRedoStack] = useState([]) // For redo functionality
   const currentLineRef = useRef([]) // Ref for tracking current line during draw
+  // SVG overlay state
+  const [svgOverlay, setSvgOverlay] = useState(null) // SVG data URL
+  const [svgBounds, setSvgBounds] = useState(null) // Current bounds of SVG overlay
+  const [svgOpacity, setSvgOpacity] = useState(0.6)
+  const [svgAspectRatio, setSvgAspectRatio] = useState(null)
+  const [svgNormalizedPoints, setSvgNormalizedPoints] = useState([]) // Normalized SVG path points (0-1 range)
+  const [isProcessingSVG, setIsProcessingSVG] = useState(false)
+  const [isSnappingRoads, setIsSnappingRoads] = useState(false)
   const mapRef = useRef(null)
   const pngFileInputRef = useRef(null)
+  const svgFileInputRef = useRef(null)
 
   // Handle line completion (called when mouse is released after drawing)
   const handleLineComplete = useCallback((line) => {
@@ -237,6 +246,366 @@ function App() {
     // Fallback to straight line if OSRM fails
     return [[start[0], start[1]], [end[0], end[1]]]
   }, [])
+
+  // Parse SVG path data and convert to normalized coordinates (0-1 range)
+  const parseSVGPath = useCallback((pathData, viewBox) => {
+    const commands = pathData.match(/[MmLlHhVvCcSsQqTtAaZz][^MmLlHhVvCcSsQqTtAaZz]*/g) || []
+    const points = []
+    let currentX = 0
+    let currentY = 0
+    let startX = 0
+    let startY = 0
+
+    const vb = viewBox ? viewBox.split(/\s+|,/).map(Number).filter(n => !isNaN(n)) : [0, 0, 100, 100]
+    if (vb.length < 4) return []
+    const svgWidth = vb[2] - vb[0]
+    const svgHeight = vb[3] - vb[1]
+    if (svgWidth <= 0 || svgHeight <= 0) return []
+
+    commands.forEach(cmd => {
+      const command = cmd[0]
+      const coords = cmd.slice(1).trim().split(/[\s,]+/).filter(s => s).map(Number).filter(n => !isNaN(n))
+
+      try {
+        if (command === 'M' || command === 'm') {
+          if (coords.length >= 2) {
+            if (command === 'm') {
+              currentX += coords[0]
+              currentY += coords[1]
+            } else {
+              currentX = coords[0]
+              currentY = coords[1]
+            }
+            startX = currentX
+            startY = currentY
+            points.push([currentX, currentY])
+          }
+        } else if (command === 'L' || command === 'l') {
+          for (let i = 0; i < coords.length - 1; i += 2) {
+            if (command === 'l') {
+              currentX += coords[i]
+              currentY += coords[i + 1]
+            } else {
+              currentX = coords[i]
+              currentY = coords[i + 1]
+            }
+            points.push([currentX, currentY])
+          }
+        } else if (command === 'H' || command === 'h') {
+          coords.forEach(x => {
+            currentX = command === 'h' ? currentX + x : x
+            points.push([currentX, currentY])
+          })
+        } else if (command === 'V' || command === 'v') {
+          coords.forEach(y => {
+            currentY = command === 'v' ? currentY + y : y
+            points.push([currentX, currentY])
+          })
+        } else if (command === 'C' || command === 'c') {
+          for (let i = 0; i < coords.length - 5; i += 6) {
+            const x3 = command === 'c' ? currentX + coords[i + 4] : coords[i + 4]
+            const y3 = command === 'c' ? currentY + coords[i + 5] : coords[i + 5]
+            // Sample bezier curve at intervals
+            for (let t = 0.25; t <= 1; t += 0.25) {
+              const x1 = command === 'c' ? currentX + coords[i] : coords[i]
+              const y1 = command === 'c' ? currentY + coords[i + 1] : coords[i + 1]
+              const x2 = command === 'c' ? currentX + coords[i + 2] : coords[i + 2]
+              const y2 = command === 'c' ? currentY + coords[i + 3] : coords[i + 3]
+              const px = Math.pow(1-t,3)*currentX + 3*Math.pow(1-t,2)*t*x1 + 3*(1-t)*t*t*x2 + Math.pow(t,3)*x3
+              const py = Math.pow(1-t,3)*currentY + 3*Math.pow(1-t,2)*t*y1 + 3*(1-t)*t*t*y2 + Math.pow(t,3)*y3
+              if (!isNaN(px) && !isNaN(py)) points.push([px, py])
+            }
+            currentX = x3
+            currentY = y3
+          }
+        } else if (command === 'Z' || command === 'z') {
+          if (points.length > 0 && (currentX !== startX || currentY !== startY)) {
+            points.push([startX, startY])
+          }
+          currentX = startX
+          currentY = startY
+        }
+      } catch (err) {
+        console.warn('Error parsing SVG command:', command, err)
+      }
+    })
+
+    // Normalize to 0-1 range
+    return points
+      .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
+      .map(p => [(p[0] - vb[0]) / svgWidth, (p[1] - vb[1]) / svgHeight])
+      .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
+  }, [])
+
+  // Convert shape elements to normalized points
+  const shapeToPoints = useCallback((element, viewBox) => {
+    const vb = viewBox ? viewBox.split(/\s+|,/).map(Number).filter(n => !isNaN(n)) : [0, 0, 100, 100]
+    if (vb.length < 4) return []
+    const svgWidth = vb[2] - vb[0] || 100
+    const svgHeight = vb[3] - vb[1] || 100
+    const tagName = element.tagName.toLowerCase()
+    const pts = []
+
+    try {
+      if (tagName === 'rect') {
+        const x = parseFloat(element.getAttribute('x') || 0)
+        const y = parseFloat(element.getAttribute('y') || 0)
+        const w = parseFloat(element.getAttribute('width') || 0)
+        const h = parseFloat(element.getAttribute('height') || 0)
+        if ([x,y,w,h].some(isNaN)) return []
+        pts.push([x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y])
+      } else if (tagName === 'circle' || tagName === 'ellipse') {
+        const cx = parseFloat(element.getAttribute('cx') || 0)
+        const cy = parseFloat(element.getAttribute('cy') || 0)
+        const rx = tagName === 'circle' ? parseFloat(element.getAttribute('r') || 0) : parseFloat(element.getAttribute('rx') || 0)
+        const ry = tagName === 'ellipse' ? parseFloat(element.getAttribute('ry') || rx) : rx
+        if ([cx,cy,rx,ry].some(isNaN)) return []
+        for (let i = 0; i <= 24; i++) {
+          const angle = (i / 24) * Math.PI * 2
+          pts.push([cx + rx * Math.cos(angle), cy + ry * Math.sin(angle)])
+        }
+      } else if (tagName === 'polygon' || tagName === 'polyline') {
+        const pointsAttr = element.getAttribute('points')
+        if (pointsAttr) {
+          const coords = pointsAttr.trim().split(/[\s,]+/).map(Number).filter(n => !isNaN(n))
+          for (let i = 0; i < coords.length - 1; i += 2) {
+            pts.push([coords[i], coords[i + 1]])
+          }
+          if (tagName === 'polygon' && pts.length > 0) pts.push([pts[0][0], pts[0][1]])
+        }
+      } else if (tagName === 'line') {
+        const x1 = parseFloat(element.getAttribute('x1') || 0)
+        const y1 = parseFloat(element.getAttribute('y1') || 0)
+        const x2 = parseFloat(element.getAttribute('x2') || 0)
+        const y2 = parseFloat(element.getAttribute('y2') || 0)
+        if ([x1,y1,x2,y2].some(isNaN)) return []
+        pts.push([x1, y1], [x2, y2])
+      }
+    } catch (err) {
+      console.warn('Error parsing shape:', tagName, err)
+      return []
+    }
+
+    return pts
+      .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
+      .map(p => [(p[0] - vb[0]) / svgWidth, (p[1] - vb[1]) / svgHeight])
+      .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
+  }, [])
+
+  // Convert normalized points to map coordinates based on current bounds
+  const normalizedToMapCoords = useCallback((normalizedPoints, bounds) => {
+    if (!bounds || normalizedPoints.length === 0) return []
+    
+    const south = bounds[0][0]
+    const west = bounds[0][1]
+    const north = bounds[1][0]
+    const east = bounds[1][1]
+    const height = north - south
+    const width = east - west
+    
+    return normalizedPoints
+      .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
+      .map(p => {
+        // SVG y increases downward, lat increases upward, so invert y
+        const lat = north - p[1] * height
+        const lng = west + p[0] * width
+        return [lat, lng]
+      })
+      .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
+  }, [])
+
+  // Snap points to roads using OSRM
+  const snapToRoadsOSRM = useCallback(async (mapPoints) => {
+    if (mapPoints.length < 2) return mapPoints
+    
+    // Reduce waypoints for OSRM (max ~100 per request)
+    const MAX_WAYPOINTS = 40
+    let waypoints = mapPoints
+    if (mapPoints.length > MAX_WAYPOINTS) {
+      const step = Math.ceil(mapPoints.length / MAX_WAYPOINTS)
+      waypoints = []
+      for (let i = 0; i < mapPoints.length; i += step) {
+        waypoints.push(mapPoints[i])
+      }
+      if (waypoints[waypoints.length - 1] !== mapPoints[mapPoints.length - 1]) {
+        waypoints.push(mapPoints[mapPoints.length - 1])
+      }
+    }
+    
+    const snappedPoints = []
+    
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      try {
+        const segment = await getOSRMRoute(waypoints[i], waypoints[i + 1])
+        if (segment && segment.length > 0) {
+          if (i === 0) {
+            snappedPoints.push(...segment)
+          } else {
+            snappedPoints.push(...segment.slice(1))
+          }
+        } else {
+          if (i === 0) snappedPoints.push(waypoints[i])
+          snappedPoints.push(waypoints[i + 1])
+        }
+      } catch (err) {
+        console.warn('OSRM segment error:', err)
+        if (i === 0) snappedPoints.push(waypoints[i])
+        snappedPoints.push(waypoints[i + 1])
+      }
+    }
+    
+    return snappedPoints
+  }, [getOSRMRoute])
+
+  // Handle SVG upload
+  const handleSVGUpload = useCallback(async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    if (!file.type.includes('svg') && !file.name.toLowerCase().endsWith('.svg')) {
+      alert('Please upload an SVG file')
+      return
+    }
+    
+    setIsProcessingSVG(true)
+    
+    try {
+      const text = await file.text()
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(text, 'image/svg+xml')
+      
+      const parserError = doc.querySelector('parsererror')
+      if (parserError) throw new Error('Invalid SVG file')
+      
+      const svg = doc.querySelector('svg')
+      if (!svg) throw new Error('No SVG element found')
+      
+      // Get viewBox or dimensions
+      let viewBox = svg.getAttribute('viewBox')
+      if (!viewBox) {
+        const w = parseFloat(svg.getAttribute('width') || 100)
+        const h = parseFloat(svg.getAttribute('height') || 100)
+        viewBox = `0 0 ${w} ${h}`
+      }
+      
+      // Parse viewBox for aspect ratio
+      const vb = viewBox.split(/\s+|,/).map(Number).filter(n => !isNaN(n))
+      const svgWidth = vb[2] - vb[0]
+      const svgHeight = vb[3] - vb[1]
+      const aspectRatio = svgWidth / svgHeight
+      
+      // Extract all drawable elements
+      const paths = svg.querySelectorAll('path')
+      const rects = svg.querySelectorAll('rect')
+      const circles = svg.querySelectorAll('circle, ellipse')
+      const polygons = svg.querySelectorAll('polygon, polyline')
+      const lines = svg.querySelectorAll('line')
+      
+      let allPoints = []
+      
+      paths.forEach(path => {
+        const d = path.getAttribute('d')
+        if (d) {
+          const pts = parseSVGPath(d, viewBox)
+          if (pts.length > 0) allPoints.push(...pts)
+        }
+      })
+      
+      ;[...rects, ...circles, ...polygons, ...lines].forEach(el => {
+        const pts = shapeToPoints(el, viewBox)
+        if (pts.length > 0) allPoints.push(...pts)
+      })
+      
+      if (allPoints.length === 0) {
+        alert('Could not extract any paths from the SVG')
+        setIsProcessingSVG(false)
+        return
+      }
+      
+      // Store normalized points
+      setSvgNormalizedPoints(allPoints)
+      setSvgAspectRatio(aspectRatio)
+      
+      // Create data URL for overlay
+      const blob = new Blob([text], { type: 'image/svg+xml' })
+      const dataUrl = URL.createObjectURL(blob)
+      setSvgOverlay(dataUrl)
+      
+      // Set initial bounds centered on map
+      if (mapRef.current) {
+        const mapBounds = mapRef.current.getBounds()
+        const center = mapBounds.getCenter()
+        const mapWidth = mapBounds.getEast() - mapBounds.getWest()
+        const mapHeight = mapBounds.getNorth() - mapBounds.getSouth()
+        
+        let overlayWidth, overlayHeight
+        if (aspectRatio > mapWidth / mapHeight) {
+          overlayWidth = mapWidth * 0.6
+          overlayHeight = overlayWidth / aspectRatio
+        } else {
+          overlayHeight = mapHeight * 0.6
+          overlayWidth = overlayHeight * aspectRatio
+        }
+        
+        const bounds = [
+          [center.lat - overlayHeight / 2, center.lng - overlayWidth / 2],
+          [center.lat + overlayHeight / 2, center.lng + overlayWidth / 2]
+        ]
+        setSvgBounds(bounds)
+        
+        // Initial road snap
+        await snapSVGToRoads(allPoints, bounds)
+      }
+      
+    } catch (err) {
+      console.error('SVG processing error:', err)
+      alert(`Error processing SVG: ${err.message}`)
+    } finally {
+      setIsProcessingSVG(false)
+    }
+  }, [parseSVGPath, shapeToPoints])
+
+  // Snap SVG to roads based on current bounds
+  const snapSVGToRoads = useCallback(async (normalizedPoints, bounds) => {
+    if (!normalizedPoints || normalizedPoints.length === 0 || !bounds) return
+    
+    setIsSnappingRoads(true)
+    try {
+      const mapPoints = normalizedToMapCoords(normalizedPoints, bounds)
+      if (mapPoints.length < 2) {
+        setIsSnappingRoads(false)
+        return
+      }
+      
+      const snappedPoints = await snapToRoadsOSRM(mapPoints)
+      setPoints(snappedPoints)
+      
+    } catch (err) {
+      console.error('Road snapping error:', err)
+    } finally {
+      setIsSnappingRoads(false)
+    }
+  }, [normalizedToMapCoords, snapToRoadsOSRM])
+
+  // Handle SVG bounds change (when user resizes/moves the overlay)
+  const handleSVGBoundsChange = useCallback(async (newBounds) => {
+    setSvgBounds(newBounds)
+    // Re-snap to roads with new bounds
+    if (svgNormalizedPoints.length > 0) {
+      await snapSVGToRoads(svgNormalizedPoints, newBounds)
+    }
+  }, [svgNormalizedPoints, snapSVGToRoads])
+
+  // Clear SVG overlay
+  const clearSVGOverlay = useCallback(() => {
+    if (svgOverlay) {
+      URL.revokeObjectURL(svgOverlay)
+    }
+    setSvgOverlay(null)
+    setSvgBounds(null)
+    setSvgNormalizedPoints([])
+    setSvgAspectRatio(null)
+  }, [svgOverlay])
 
   // Handle map click to add points
   const handleMapClick = useCallback(async (e) => {
@@ -775,6 +1144,70 @@ function App() {
                     </div>
                   )}
                 </div>
+
+                {/* SVG Road-Snap Overlay */}
+                <div className="flex flex-col gap-2 mt-4 pt-4 border-t border-indigo-200">
+                  <label className="font-semibold text-gray-700 flex items-center">
+                    🛣️ SVG Route Generator
+                    <Tooltip content="Upload an SVG file to automatically generate a road-snapped route. Resize the overlay and the route will re-snap to roads at the new size!" />
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      ref={svgFileInputRef}
+                      type="file"
+                      accept="image/svg+xml,.svg"
+                      onChange={handleSVGUpload}
+                      className="hidden"
+                    />
+                    <button
+                      onClick={() => svgFileInputRef.current?.click()}
+                      disabled={isProcessingSVG || isSnappingRoads}
+                      className="flex-1 px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isProcessingSVG ? '⏳ Processing...' : isSnappingRoads ? '🛣️ Snapping...' : svgOverlay ? '🔄 Re-upload SVG' : '📁 Upload SVG'}
+                    </button>
+                    {svgOverlay && (
+                      <button
+                        onClick={clearSVGOverlay}
+                        className="px-4 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  {svgOverlay && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">Opacity:</label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={svgOpacity}
+                          onChange={(e) => setSvgOpacity(parseFloat(e.target.value))}
+                          className="flex-1"
+                        />
+                        <span className="text-sm text-gray-600 w-12">{Math.round(svgOpacity * 100)}%</span>
+                      </div>
+                      <button
+                        onClick={() => snapSVGToRoads(svgNormalizedPoints, svgBounds)}
+                        disabled={isSnappingRoads || svgNormalizedPoints.length === 0}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isSnappingRoads ? '🔄 Re-snapping...' : '🛣️ Re-snap to Roads'}
+                      </button>
+                      <p className="text-xs text-gray-500">
+                        💡 Drag corners to resize the SVG overlay. Roads will automatically re-snap when you release.
+                      </p>
+                    </>
+                  )}
+                  {(isProcessingSVG || isSnappingRoads) && (
+                    <div className="text-sm text-emerald-600 animate-pulse">
+                      {isProcessingSVG ? '⏳ Parsing SVG file...' : '🛣️ Finding road routes...'}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             
@@ -997,6 +1430,17 @@ function App() {
               />
             )}
             
+            {/* SVG Overlay with Road Snapping */}
+            {svgOverlay && svgBounds && (
+              <ResizableImageOverlay
+                url={svgOverlay}
+                bounds={svgBounds}
+                opacity={svgOpacity}
+                aspectRatio={svgAspectRatio}
+                onBoundsChange={handleSVGBoundsChange}
+              />
+            )}
+            
             {/* Legacy Image Overlay (for PNG route generation) */}
             {imageOverlay && imageBounds && (
               <ImageOverlay
@@ -1073,6 +1517,14 @@ function App() {
             <li className="flex items-start gap-2">
               <span className="text-indigo-600">→</span>
               <span>Upload a transparent PNG image to overlay and trace over</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-emerald-500">🛣️</span>
+              <span><strong>SVG Route Generator:</strong> Upload an SVG file to auto-generate a road-snapped route</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-emerald-500">↔️</span>
+              <span>Resize the SVG overlay to adjust route size - roads auto-snap when you release</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-orange-500">✏️</span>

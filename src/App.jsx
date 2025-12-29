@@ -65,11 +65,8 @@ function App() {
   const [referenceBounds, setReferenceBounds] = useState(null)
   const [referenceOpacity, setReferenceOpacity] = useState(0.5)
   const [referenceAspectRatio, setReferenceAspectRatio] = useState(null)
-  const [targetDistance, setTargetDistance] = useState(5.0)
-  const [isProcessingSVG, setIsProcessingSVG] = useState(false)
   const mapRef = useRef(null)
   const pngFileInputRef = useRef(null)
-  const svgFileInputRef = useRef(null)
 
   // Get OSRM route between two points
   const getOSRMRoute = useCallback(async (start, end) => {
@@ -214,108 +211,6 @@ function App() {
     return totalDistance
   }
 
-  // Parse SVG path data and convert to coordinates
-  const parseSVGPath = (pathData, viewBox) => {
-    const commands = pathData.match(/[MmLlHhVvCcSsQqTtAaZz][^MmLlHhVvCcSsQqTtAaZz]*/g) || []
-    const points = []
-    let currentX = 0
-    let currentY = 0
-    let startX = 0
-    let startY = 0
-
-    // Parse viewBox to get SVG dimensions
-    const vb = viewBox ? viewBox.split(/\s+|,/).map(Number) : [0, 0, 100, 100]
-    const svgWidth = vb[2] - vb[0]
-    const svgHeight = vb[3] - vb[1]
-
-    commands.forEach(cmd => {
-      const command = cmd[0]
-      const coords = cmd.slice(1).trim().split(/[\s,]+/).filter(s => s).map(Number)
-
-      if (command === 'M' || command === 'm') {
-        if (command === 'm') {
-          currentX += coords[0]
-          currentY += coords[1]
-        } else {
-          currentX = coords[0]
-          currentY = coords[1]
-        }
-        startX = currentX
-        startY = currentY
-        points.push([currentX, currentY])
-      } else if (command === 'L' || command === 'l') {
-        for (let i = 0; i < coords.length; i += 2) {
-          if (command === 'l') {
-            currentX += coords[i]
-            currentY += coords[i + 1]
-          } else {
-            currentX = coords[i]
-            currentY = coords[i + 1]
-          }
-          points.push([currentX, currentY])
-        }
-      } else if (command === 'H' || command === 'h') {
-        coords.forEach(x => {
-          currentX = command === 'h' ? currentX + x : x
-          points.push([currentX, currentY])
-        })
-      } else if (command === 'V' || command === 'v') {
-        coords.forEach(y => {
-          currentY = command === 'v' ? currentY + y : y
-          points.push([currentX, currentY])
-        })
-      } else if (command === 'C' || command === 'c') {
-        // Cubic bezier - approximate with line segments
-        for (let i = 0; i < coords.length; i += 6) {
-          const x1 = command === 'c' ? currentX + coords[i] : coords[i]
-          const y1 = command === 'c' ? currentY + coords[i + 1] : coords[i + 1]
-          const x2 = command === 'c' ? currentX + coords[i + 2] : coords[i + 2]
-          const y2 = command === 'c' ? currentY + coords[i + 3] : coords[i + 3]
-          const x3 = command === 'c' ? currentX + coords[i + 4] : coords[i + 4]
-          const y3 = command === 'c' ? currentY + coords[i + 5] : coords[i + 5]
-          
-          // Sample bezier curve
-          for (let t = 0.1; t <= 1; t += 0.1) {
-            const x = Math.pow(1 - t, 3) * currentX + 3 * Math.pow(1 - t, 2) * t * x1 + 3 * (1 - t) * Math.pow(t, 2) * x2 + Math.pow(t, 3) * x3
-            const y = Math.pow(1 - t, 3) * currentY + 3 * Math.pow(1 - t, 2) * t * y1 + 3 * (1 - t) * Math.pow(t, 2) * y2 + Math.pow(t, 3) * y3
-            points.push([x, y])
-          }
-          currentX = x3
-          currentY = y3
-        }
-      } else if (command === 'Z' || command === 'z') {
-        // Close path
-        if (points.length > 0 && (currentX !== startX || currentY !== startY)) {
-          points.push([startX, startY])
-        }
-      }
-    })
-
-    // Normalize points to 0-1 range
-    if (svgWidth > 0 && svgHeight > 0) {
-      return points.map(p => [
-        (p[0] - vb[0]) / svgWidth,
-        (p[1] - vb[1]) / svgHeight
-      ])
-    }
-    return points
-  }
-
-  // Convert SVG coordinates to map coordinates
-  const svgToMapCoordinates = (svgPoints, bounds) => {
-    const center = bounds.getCenter()
-    const ne = bounds.getNorthEast()
-    const sw = bounds.getSouthWest()
-    
-    return svgPoints
-      .filter(point => !isNaN(point[0]) && !isNaN(point[1]))
-      .map(point => {
-        const lat = center.lat + (point[1] - 0.5) * (ne.lat - sw.lat)
-        const lng = center.lng + (point[0] - 0.5) * (ne.lng - sw.lng)
-        return [lat, lng]
-      })
-      .filter(coord => !isNaN(coord[0]) && !isNaN(coord[1]))
-  }
 
   // Handle PNG reference overlay upload
   const handlePNGUpload = (e) => {
@@ -373,363 +268,6 @@ function App() {
     }
   }
 
-  // Convert SVG shape elements to normalized points (0-1 range)
-  const shapeToPoints = (element, viewBox) => {
-    const vb = viewBox ? viewBox.split(/\s+|,/).map(Number) : [0, 0, 100, 100]
-    const svgWidth = vb[2] - vb[0] || 100
-    const svgHeight = vb[3] - vb[1] || 100
-    const tagName = element.tagName.toLowerCase()
-    const points = []
-
-    try {
-      if (tagName === 'rect') {
-        const x = parseFloat(element.getAttribute('x') || 0)
-        const y = parseFloat(element.getAttribute('y') || 0)
-        const width = parseFloat(element.getAttribute('width') || 0)
-        const height = parseFloat(element.getAttribute('height') || 0)
-        // Skip if any values are NaN
-        if (isNaN(x) || isNaN(y) || isNaN(width) || isNaN(height)) return []
-        // Create rectangle as 4 corners
-        points.push([x, y])
-        points.push([x + width, y])
-        points.push([x + width, y + height])
-        points.push([x, y + height])
-        points.push([x, y]) // Close the rectangle
-      } else if (tagName === 'circle' || tagName === 'ellipse') {
-        const cx = parseFloat(element.getAttribute('cx') || 0)
-        const cy = parseFloat(element.getAttribute('cy') || 0)
-        const r = tagName === 'circle' 
-          ? parseFloat(element.getAttribute('r') || 0)
-          : parseFloat(element.getAttribute('rx') || 0)
-        const ry = tagName === 'ellipse'
-          ? parseFloat(element.getAttribute('ry') || r)
-          : r
-        // Skip if any values are NaN
-        if (isNaN(cx) || isNaN(cy) || isNaN(r) || isNaN(ry)) return []
-        // Create circle/ellipse as points around the perimeter
-        const steps = 32
-        for (let i = 0; i <= steps; i++) {
-          const angle = (i / steps) * Math.PI * 2
-          points.push([cx + r * Math.cos(angle), cy + ry * Math.sin(angle)])
-        }
-      } else if (tagName === 'polygon' || tagName === 'polyline') {
-        const pointsAttr = element.getAttribute('points')
-        if (pointsAttr) {
-          const coords = pointsAttr.trim().split(/[\s,]+/).filter(s => s).map(Number)
-          for (let i = 0; i < coords.length; i += 2) {
-            if (i + 1 < coords.length && !isNaN(coords[i]) && !isNaN(coords[i + 1])) {
-              points.push([coords[i], coords[i + 1]])
-            }
-          }
-          // Close polygon if it's a polygon (not polyline)
-          if (tagName === 'polygon' && points.length > 0) {
-            points.push([points[0][0], points[0][1]])
-          }
-        }
-      } else if (tagName === 'line') {
-        const x1 = parseFloat(element.getAttribute('x1') || 0)
-        const y1 = parseFloat(element.getAttribute('y1') || 0)
-        const x2 = parseFloat(element.getAttribute('x2') || 0)
-        const y2 = parseFloat(element.getAttribute('y2') || 0)
-        // Skip if any values are NaN
-        if (isNaN(x1) || isNaN(y1) || isNaN(x2) || isNaN(y2)) return []
-        points.push([x1, y1])
-        points.push([x2, y2])
-      }
-    } catch (err) {
-      console.error('Error parsing shape:', tagName, err)
-      return []
-    }
-
-    // Normalize to 0-1 range based on viewBox (matching parseSVGPath behavior)
-    if (points.length > 0 && svgWidth > 0 && svgHeight > 0) {
-      return points
-        .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
-        .map(p => [
-          (p[0] - vb[0]) / svgWidth,
-          (p[1] - vb[1]) / svgHeight
-        ])
-        .filter(p => !isNaN(p[0]) && !isNaN(p[1]))
-    }
-    return []
-  }
-
-  // Handle SVG auto-route upload
-  const handleSVGUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-
-    if (file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')) {
-      setIsProcessingSVG(true)
-      const reader = new FileReader()
-      reader.onload = async (event) => {
-        try {
-          const svgText = event.target.result
-          const parser = new DOMParser()
-          const svgDoc = parser.parseFromString(svgText, 'image/svg+xml')
-          
-          // Check for parsing errors
-          const parserError = svgDoc.querySelector('parsererror')
-          if (parserError) {
-            throw new Error(`SVG parsing error: ${parserError.textContent || 'Invalid SVG format'}`)
-          }
-          
-          const svgElement = svgDoc.querySelector('svg')
-          
-          if (!svgElement) {
-            throw new Error('Invalid SVG file - no <svg> element found')
-          }
-
-          const viewBox = svgElement.getAttribute('viewBox') || svgElement.getAttribute('viewbox') || 
-                         `0 0 ${svgElement.getAttribute('width') || 100} ${svgElement.getAttribute('height') || 100}`
-
-          // Get all drawable elements (including those nested in groups)
-          const paths = svgElement.querySelectorAll('path')
-          const rects = svgElement.querySelectorAll('rect')
-          const circles = svgElement.querySelectorAll('circle, ellipse')
-          const polygons = svgElement.querySelectorAll('polygon, polyline')
-          const lines = svgElement.querySelectorAll('line')
-
-          // Debug: log what we found
-          console.log('SVG elements found:', {
-            paths: paths.length,
-            rects: rects.length,
-            circles: circles.length,
-            polygons: polygons.length,
-            lines: lines.length
-          })
-
-          // Check if we found any elements
-          const totalElements = paths.length + rects.length + circles.length + polygons.length + lines.length
-          
-          if (totalElements === 0) {
-            // Try to find ANY element to help debug
-            const allElements = svgElement.querySelectorAll('*')
-            const elementTypes = Array.from(allElements).map(el => el.tagName.toLowerCase()).filter((v, i, a) => a.indexOf(v) === i)
-            console.log('No drawable elements found. Available element types:', elementTypes)
-            alert(`No drawable elements found in SVG. Found element types: ${elementTypes.join(', ')}. Please ensure your SVG contains <path>, <rect>, <circle>, <polygon>, or similar elements.`)
-            setIsProcessingSVG(false)
-            return
-          }
-
-          // Combine all elements into points
-          let allPoints = []
-          
-          // Process paths (with error handling)
-          paths.forEach(path => {
-            try {
-              const pathData = path.getAttribute('d')
-              if (pathData) {
-                const points = parseSVGPath(pathData, viewBox)
-                if (points && points.length > 0) {
-                  allPoints = [...allPoints, ...points]
-                }
-              }
-            } catch (err) {
-              console.warn('Error processing path:', err)
-            }
-          })
-
-          // Process shapes (with error handling)
-          rects.forEach(rect => {
-            try {
-              const points = shapeToPoints(rect, viewBox)
-              if (points && points.length > 0) {
-                allPoints = [...allPoints, ...points]
-              }
-            } catch (err) {
-              console.warn('Error processing rect:', err)
-            }
-          })
-
-          circles.forEach(circle => {
-            try {
-              const points = shapeToPoints(circle, viewBox)
-              if (points && points.length > 0) {
-                allPoints = [...allPoints, ...points]
-              }
-            } catch (err) {
-              console.warn('Error processing circle:', err)
-            }
-          })
-
-          polygons.forEach(poly => {
-            try {
-              const points = shapeToPoints(poly, viewBox)
-              if (points && points.length > 0) {
-                allPoints = [...allPoints, ...points]
-              }
-            } catch (err) {
-              console.warn('Error processing polygon:', err)
-            }
-          })
-
-          lines.forEach(line => {
-            try {
-              const points = shapeToPoints(line, viewBox)
-              if (points && points.length > 0) {
-                allPoints = [...allPoints, ...points]
-              }
-            } catch (err) {
-              console.warn('Error processing line:', err)
-            }
-          })
-
-          if (allPoints.length === 0) {
-            alert('Could not extract points from SVG elements.')
-            setIsProcessingSVG(false)
-            return
-          }
-
-          if (!mapRef.current) {
-            setIsProcessingSVG(false)
-            return
-          }
-
-          // Convert to map coordinates
-          const bounds = mapRef.current.getBounds()
-          let mapPoints = svgToMapCoordinates(allPoints, bounds)
-
-          console.log('Initial map points:', mapPoints.length)
-
-          // Reduce number of points for OSRM waypoint limit
-          const MAX_WAYPOINTS = 50
-          if (mapPoints.length > MAX_WAYPOINTS) {
-            console.log(`Reducing ${mapPoints.length} points to ${MAX_WAYPOINTS} waypoints`)
-            const step = Math.floor(mapPoints.length / MAX_WAYPOINTS)
-            const sampledPoints = []
-            for (let i = 0; i < mapPoints.length; i += step) {
-              sampledPoints.push(mapPoints[i])
-            }
-            // Always include the last point
-            if (sampledPoints[sampledPoints.length - 1] !== mapPoints[mapPoints.length - 1]) {
-              sampledPoints.push(mapPoints[mapPoints.length - 1])
-            }
-            mapPoints = sampledPoints
-            console.log(`Sampled to ${mapPoints.length} waypoints`)
-          }
-
-          // Snap to roads using OSRM
-          console.log('Snapping route to roads...')
-          const roadSnappedPoints = []
-          
-          for (let i = 0; i < mapPoints.length - 1; i++) {
-            const start = mapPoints[i]
-            const end = mapPoints[i + 1]
-            
-            try {
-              const routeSegment = await getOSRMRoute(start, end)
-              if (routeSegment && routeSegment.length > 0) {
-                // Add all points from this segment except the last (to avoid duplicates)
-                if (i === 0) {
-                  roadSnappedPoints.push(...routeSegment)
-                } else {
-                  roadSnappedPoints.push(...routeSegment.slice(1))
-                }
-              } else {
-                // If OSRM fails, fall back to straight line
-                if (i === 0) roadSnappedPoints.push(start)
-                roadSnappedPoints.push(end)
-              }
-            } catch (error) {
-              console.warn(`Failed to route segment ${i} to ${i+1}:`, error)
-              // Fall back to straight line
-              if (i === 0) roadSnappedPoints.push(start)
-              roadSnappedPoints.push(end)
-            }
-            
-            // Show progress
-            if ((i + 1) % 10 === 0 || i === mapPoints.length - 2) {
-              console.log(`Processed ${i + 1}/${mapPoints.length - 1} segments`)
-            }
-          }
-
-          console.log('Road-snapped points:', roadSnappedPoints.length)
-
-          // Use road-snapped points if available, otherwise fall back to direct points
-          let finalPoints = roadSnappedPoints.length > 0 ? roadSnappedPoints : mapPoints
-
-          // Calculate actual distance and scale to target distance if specified
-          const actualDistance = calculateRouteDistance(finalPoints)
-          if (actualDistance > 0 && targetDistance > 0) {
-            const scaleFactor = targetDistance / actualDistance
-            const centerLat = finalPoints.reduce((sum, p) => sum + p[0], 0) / finalPoints.length
-            const centerLng = finalPoints.reduce((sum, p) => sum + p[1], 0) / finalPoints.length
-            
-            console.log(`Scaling route from ${actualDistance.toFixed(2)} miles to ${targetDistance} miles (factor: ${scaleFactor.toFixed(2)})`)
-            
-            const scaledPoints = finalPoints.map((point) => {
-              const deltaLat = (point[0] - centerLat) * scaleFactor
-              const deltaLng = (point[1] - centerLng) * scaleFactor
-              return [centerLat + deltaLat, centerLng + deltaLng]
-            })
-
-            // Re-snap scaled route to roads with fewer waypoints
-            console.log('Re-snapping scaled route to roads...')
-            const scaledWaypoints = []
-            const waypointStep = Math.max(1, Math.floor(scaledPoints.length / 30))
-            for (let i = 0; i < scaledPoints.length; i += waypointStep) {
-              scaledWaypoints.push(scaledPoints[i])
-            }
-            if (scaledWaypoints[scaledWaypoints.length - 1] !== scaledPoints[scaledPoints.length - 1]) {
-              scaledWaypoints.push(scaledPoints[scaledPoints.length - 1])
-            }
-
-            const scaledRoadPoints = []
-            for (let i = 0; i < scaledWaypoints.length - 1; i++) {
-              try {
-                const routeSegment = await getOSRMRoute(scaledWaypoints[i], scaledWaypoints[i + 1])
-                if (routeSegment && routeSegment.length > 0) {
-                  if (i === 0) {
-                    scaledRoadPoints.push(...routeSegment)
-                  } else {
-                    scaledRoadPoints.push(...routeSegment.slice(1))
-                  }
-                } else {
-                  if (i === 0) scaledRoadPoints.push(scaledWaypoints[i])
-                  scaledRoadPoints.push(scaledWaypoints[i + 1])
-                }
-              } catch (error) {
-                console.warn(`Failed to route scaled segment ${i}:`, error)
-                if (i === 0) scaledRoadPoints.push(scaledWaypoints[i])
-                scaledRoadPoints.push(scaledWaypoints[i + 1])
-              }
-            }
-
-            finalPoints = scaledRoadPoints.length > 0 ? scaledRoadPoints : scaledPoints
-          }
-
-          // Set the points
-          setPoints(finalPoints)
-
-          // Fit map to route
-          if (finalPoints.length > 0) {
-            const firstPoint = finalPoints[0]
-            const routeBounds = L.latLngBounds([firstPoint, firstPoint])
-            finalPoints.forEach(point => routeBounds.extend(point))
-            
-            setTimeout(() => {
-              if (mapRef.current) {
-                mapRef.current.fitBounds(routeBounds, { padding: [50, 50] })
-              }
-            }, 100)
-          }
-
-          const finalDistance = calculateRouteDistance(finalPoints)
-          alert(`Route generated from SVG! Created ${finalPoints.length} points for ${finalDistance.toFixed(1)} miles (snapped to roads).`)
-        } catch (error) {
-          console.error('Error processing SVG:', error)
-          console.error('SVG content preview:', event.target.result.substring(0, 500))
-          alert(`Error processing SVG file: ${error.message || 'Unknown error'}. Please check the browser console for details.`)
-        } finally {
-          setIsProcessingSVG(false)
-        }
-      }
-      reader.readAsText(file)
-    } else {
-      alert('Please upload an SVG file')
-    }
-  }
 
   // Process image to extract route points
   const imageToRoute = async (imageDataUrl, desiredMiles) => {
@@ -1046,99 +584,54 @@ function App() {
               <div className="border-2 border-indigo-200 rounded-lg p-4 bg-indigo-50">
                 <h3 className="text-lg font-bold text-indigo-900 mb-4">Design Tools</h3>
                 
-                {/* Target Distance */}
-                <div className="mb-4">
+                {/* PNG Reference Overlay */}
+                <div className="flex flex-col gap-2">
                   <label className="font-semibold text-gray-700 flex items-center">
-                    Target Distance (Miles)
+                    Reference Overlay (PNG)
+                    <Tooltip content="Upload a reference image or sketch. PNGs support transparency, allowing you to see the map underneath so you can manually trace your route." />
                   </label>
-                  <input
-                    type="number"
-                    min="0.1"
-                    max="100"
-                    step="0.1"
-                    value={targetDistance}
-                    onChange={(e) => setTargetDistance(parseFloat(e.target.value) || 5.0)}
-                    className="w-full mt-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {/* PNG Reference Overlay */}
-                  <div className="flex flex-col gap-2">
-                    <label className="font-semibold text-gray-700 flex items-center">
-                      Reference Overlay (PNG)
-                      <Tooltip content="Use this to upload a reference image or sketch. PNGs support transparency, allowing you to see the map underneath so you can manually trace your route." />
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        ref={pngFileInputRef}
-                        type="file"
-                        accept="image/png"
-                        onChange={handlePNGUpload}
-                        className="hidden"
-                      />
-                      <button
-                        onClick={() => pngFileInputRef.current?.click()}
-                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
-                      >
-                        {referenceOverlay ? 'Re-upload PNG' : 'Upload PNG'}
-                      </button>
-                      {referenceOverlay && (
-                        <button
-                          onClick={() => {
-                            setReferenceOverlay(null)
-                            setReferenceBounds(null)
-                            setReferenceAspectRatio(null)
-                          }}
-                          className="px-4 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
+                  <div className="flex gap-2">
+                    <input
+                      ref={pngFileInputRef}
+                      type="file"
+                      accept="image/png"
+                      onChange={handlePNGUpload}
+                      className="hidden"
+                    />
+                    <button
+                      onClick={() => pngFileInputRef.current?.click()}
+                      className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
+                    >
+                      {referenceOverlay ? 'Re-upload PNG' : 'Upload PNG'}
+                    </button>
                     {referenceOverlay && (
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm text-gray-600">Opacity:</label>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.1"
-                          value={referenceOpacity}
-                          onChange={(e) => setReferenceOpacity(parseFloat(e.target.value))}
-                          className="flex-1"
-                        />
-                        <span className="text-sm text-gray-600 w-12">{Math.round(referenceOpacity * 100)}%</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* SVG Auto-Route Generator */}
-                  <div className="flex flex-col gap-2">
-                    <label className="font-semibold text-gray-700 flex items-center">
-                      Auto-Route Generator (SVG)
-                      <Tooltip content="Use this for instant route generation. SVGs contain mathematical paths that can be automatically converted into GPS coordinates." />
-                    </label>
-                    <div className="flex gap-2">
-                      <input
-                        ref={svgFileInputRef}
-                        type="file"
-                        accept="image/svg+xml,.svg"
-                        onChange={handleSVGUpload}
-                        className="hidden"
-                      />
                       <button
-                        onClick={() => svgFileInputRef.current?.click()}
-                        disabled={isProcessingSVG}
-                        className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => {
+                          setReferenceOverlay(null)
+                          setReferenceBounds(null)
+                          setReferenceAspectRatio(null)
+                        }}
+                        className="px-4 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors"
                       >
-                        {isProcessingSVG ? 'Processing...' : 'Upload SVG'}
+                        Remove
                       </button>
-                    </div>
-                    {isProcessingSVG && (
-                      <p className="text-sm text-indigo-600">Processing SVG...</p>
                     )}
                   </div>
+                  {referenceOverlay && (
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-600">Opacity:</label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                        value={referenceOpacity}
+                        onChange={(e) => setReferenceOpacity(parseFloat(e.target.value))}
+                        className="flex-1"
+                      />
+                      <span className="text-sm text-gray-600 w-12">{Math.round(referenceOpacity * 100)}%</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

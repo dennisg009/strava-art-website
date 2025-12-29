@@ -779,6 +779,260 @@ function App() {
     }
   }
 
+  // Edge detection using Sobel operator
+  const detectEdges = useCallback((grayscale, width, height) => {
+    const edges = new Float32Array(width * height)
+    
+    // Sobel kernels
+    const sobelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1]
+    const sobelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1]
+    
+    for (let y = 1; y < height - 1; y++) {
+      for (let x = 1; x < width - 1; x++) {
+        let gx = 0, gy = 0
+        
+        for (let ky = -1; ky <= 1; ky++) {
+          for (let kx = -1; kx <= 1; kx++) {
+            const idx = (y + ky) * width + (x + kx)
+            const kidx = (ky + 1) * 3 + (kx + 1)
+            gx += grayscale[idx] * sobelX[kidx]
+            gy += grayscale[idx] * sobelY[kidx]
+          }
+        }
+        
+        edges[y * width + x] = Math.sqrt(gx * gx + gy * gy)
+      }
+    }
+    
+    return edges
+  }, [])
+
+  // Trace contour from edge-detected image
+  const traceContour = useCallback((edges, width, height, threshold) => {
+    const visited = new Set()
+    const contourPoints = []
+    
+    // Find starting point (first edge pixel from top-left)
+    let startX = -1, startY = -1
+    for (let y = 0; y < height && startX === -1; y++) {
+      for (let x = 0; x < width; x++) {
+        if (edges[y * width + x] > threshold) {
+          startX = x
+          startY = y
+          break
+        }
+      }
+    }
+    
+    if (startX === -1) return []
+    
+    // 8-directional neighbor offsets (clockwise from right)
+    const dx = [1, 1, 0, -1, -1, -1, 0, 1]
+    const dy = [0, 1, 1, 1, 0, -1, -1, -1]
+    
+    let x = startX, y = startY
+    let lastDir = 0
+    const maxPoints = 5000
+    
+    // Trace the contour
+    do {
+      const key = `${x},${y}`
+      if (!visited.has(key)) {
+        visited.add(key)
+        contourPoints.push([x / width, y / height]) // Normalize to 0-1
+      }
+      
+      // Find next edge pixel (start search from last direction - 2)
+      let found = false
+      const startDir = (lastDir + 6) % 8
+      
+      for (let i = 0; i < 8; i++) {
+        const dir = (startDir + i) % 8
+        const nx = x + dx[dir]
+        const ny = y + dy[dir]
+        
+        if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+          if (edges[ny * width + nx] > threshold && !visited.has(`${nx},${ny}`)) {
+            x = nx
+            y = ny
+            lastDir = dir
+            found = true
+            break
+          }
+        }
+      }
+      
+      if (!found) break
+      
+    } while ((x !== startX || y !== startY) && contourPoints.length < maxPoints)
+    
+    return contourPoints
+  }, [])
+
+  // Simplify path using Douglas-Peucker algorithm
+  const simplifyPath = useCallback((points, tolerance) => {
+    if (points.length < 3) return points
+    
+    const sqDist = (p1, p2) => {
+      const dx = p1[0] - p2[0]
+      const dy = p1[1] - p2[1]
+      return dx * dx + dy * dy
+    }
+    
+    const pointToLineDistance = (point, lineStart, lineEnd) => {
+      const A = point[0] - lineStart[0]
+      const B = point[1] - lineStart[1]
+      const C = lineEnd[0] - lineStart[0]
+      const D = lineEnd[1] - lineStart[1]
+      
+      const dot = A * C + B * D
+      const lenSq = C * C + D * D
+      let param = lenSq !== 0 ? dot / lenSq : -1
+      
+      let xx, yy
+      if (param < 0) {
+        xx = lineStart[0]
+        yy = lineStart[1]
+      } else if (param > 1) {
+        xx = lineEnd[0]
+        yy = lineEnd[1]
+      } else {
+        xx = lineStart[0] + param * C
+        yy = lineStart[1] + param * D
+      }
+      
+      return sqDist(point, [xx, yy])
+    }
+    
+    const simplifySegment = (start, end) => {
+      let maxDist = 0
+      let maxIdx = 0
+      
+      for (let i = start + 1; i < end; i++) {
+        const dist = pointToLineDistance(points[i], points[start], points[end])
+        if (dist > maxDist) {
+          maxDist = dist
+          maxIdx = i
+        }
+      }
+      
+      if (maxDist > tolerance * tolerance) {
+        const left = simplifySegment(start, maxIdx)
+        const right = simplifySegment(maxIdx, end)
+        return [...left.slice(0, -1), ...right]
+      } else {
+        return [points[start], points[end]]
+      }
+    }
+    
+    return simplifySegment(0, points.length - 1)
+  }, [])
+
+  // Trace PNG and snap to roads
+  const tracePNGAndSnap = useCallback(async () => {
+    if (!referenceOverlay || !referenceBounds) {
+      alert('Please upload a PNG image first')
+      return
+    }
+    
+    setIsSnappingRoads(true)
+    
+    try {
+      // Load image
+      const img = new Image()
+      await new Promise((resolve, reject) => {
+        img.onload = resolve
+        img.onerror = reject
+        img.src = referenceOverlay
+      })
+      
+      // Create canvas and draw image
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      const maxSize = 300 // Resolution for edge detection
+      const scale = Math.min(maxSize / img.width, maxSize / img.height)
+      canvas.width = Math.floor(img.width * scale)
+      canvas.height = Math.floor(img.height * scale)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      
+      // Get image data and convert to grayscale
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const data = imageData.data
+      const grayscale = new Uint8Array(canvas.width * canvas.height)
+      
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i]
+        const g = data[i + 1]
+        const b = data[i + 2]
+        const alpha = data[i + 3]
+        // Consider transparency
+        if (alpha < 128) {
+          grayscale[i / 4] = 255
+        } else {
+          grayscale[i / 4] = Math.floor((r + g + b) / 3)
+        }
+      }
+      
+      // Detect edges
+      const edges = detectEdges(grayscale, canvas.width, canvas.height)
+      
+      // Find edge threshold (adaptive)
+      const edgeValues = Array.from(edges).filter(v => v > 0).sort((a, b) => b - a)
+      const edgeThreshold = edgeValues.length > 0 ? edgeValues[Math.floor(edgeValues.length * 0.1)] : 50
+      
+      // Trace contour
+      let contourPoints = traceContour(edges, canvas.width, canvas.height, edgeThreshold)
+      
+      if (contourPoints.length < 3) {
+        // Fallback: try lower threshold
+        const lowerThreshold = edgeThreshold * 0.5
+        contourPoints = traceContour(edges, canvas.width, canvas.height, lowerThreshold)
+      }
+      
+      if (contourPoints.length < 3) {
+        alert('Could not detect outline in the image. Try an image with clearer edges.')
+        setIsSnappingRoads(false)
+        return
+      }
+      
+      // Simplify path
+      const simplifiedPoints = simplifyPath(contourPoints, 0.005)
+      
+      // Convert to map coordinates
+      const bounds = referenceBounds
+      const south = bounds[0][0]
+      const west = bounds[0][1]
+      const north = bounds[1][0]
+      const east = bounds[1][1]
+      const height = north - south
+      const width = east - west
+      
+      const mapPoints = simplifiedPoints.map(p => {
+        // Invert Y (image Y goes down, lat goes up)
+        const lat = north - p[1] * height
+        const lng = west + p[0] * width
+        return [lat, lng]
+      }).filter(p => !isNaN(p[0]) && !isNaN(p[1]))
+      
+      if (mapPoints.length < 2) {
+        alert('Not enough points extracted from image')
+        setIsSnappingRoads(false)
+        return
+      }
+      
+      // Snap to roads
+      const snappedPoints = await snapToRoadsOSRM(mapPoints)
+      setPoints(snappedPoints)
+      
+      alert(`Traced ${simplifiedPoints.length} waypoints, snapped to ${snappedPoints.length} road points!`)
+      
+    } catch (err) {
+      console.error('Trace error:', err)
+      alert(`Error tracing image: ${err.message}`)
+    } finally {
+      setIsSnappingRoads(false)
+    }
+  }, [referenceOverlay, referenceBounds, detectEdges, traceContour, simplifyPath, snapToRoadsOSRM])
 
   // Process image to extract route points
   const imageToRoute = async (imageDataUrl, desiredMiles) => {
@@ -1129,19 +1383,31 @@ function App() {
                     )}
                   </div>
                   {referenceOverlay && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-gray-600">Opacity:</label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.1"
-                        value={referenceOpacity}
-                        onChange={(e) => setReferenceOpacity(parseFloat(e.target.value))}
-                        className="flex-1"
-                      />
-                      <span className="text-sm text-gray-600 w-12">{Math.round(referenceOpacity * 100)}%</span>
-                    </div>
+                    <>
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-gray-600">Opacity:</label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={referenceOpacity}
+                          onChange={(e) => setReferenceOpacity(parseFloat(e.target.value))}
+                          className="flex-1"
+                        />
+                        <span className="text-sm text-gray-600 w-12">{Math.round(referenceOpacity * 100)}%</span>
+                      </div>
+                      <button
+                        onClick={tracePNGAndSnap}
+                        disabled={isSnappingRoads}
+                        className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isSnappingRoads ? '🔄 Tracing & Snapping...' : '✨ Trace & Snap to Roads'}
+                      </button>
+                      <p className="text-xs text-gray-500">
+                        💡 Position and resize your image, then click to auto-trace the outline and snap to roads!
+                      </p>
+                    </>
                   )}
                 </div>
 
@@ -1517,6 +1783,10 @@ function App() {
             <li className="flex items-start gap-2">
               <span className="text-indigo-600">→</span>
               <span>Upload a transparent PNG image to overlay and trace over</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-purple-500">✨</span>
+              <span><strong>Trace & Snap:</strong> Position your PNG, then click to auto-trace outline and snap to roads</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-emerald-500">🛣️</span>

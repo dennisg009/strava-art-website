@@ -145,8 +145,33 @@ function App() {
   const [redoStack, setRedoStack] = useState([]) // For redo functionality
   const currentLineRef = useRef([]) // Ref for tracking current line during draw
   const [isSnappingRoads, setIsSnappingRoads] = useState(false)
+  const [routeDistance, setRouteDistance] = useState(null) // Distance in miles
   const mapRef = useRef(null)
   const pngFileInputRef = useRef(null)
+
+  // Calculate route distance whenever points change
+  useEffect(() => {
+    if (points.length >= 2) {
+      let totalDistance = 0
+      for (let i = 1; i < points.length; i++) {
+        const R = 3959 // Earth's radius in miles
+        const lat1 = points[i - 1][0] * Math.PI / 180
+        const lat2 = points[i][0] * Math.PI / 180
+        const deltaLat = (points[i][0] - points[i - 1][0]) * Math.PI / 180
+        const deltaLng = (points[i][1] - points[i - 1][1]) * Math.PI / 180
+        
+        const a = Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+                  Math.cos(lat1) * Math.cos(lat2) *
+                  Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2)
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        
+        totalDistance += R * c
+      }
+      setRouteDistance(totalDistance)
+    } else {
+      setRouteDistance(null)
+    }
+  }, [points])
 
   // Handle line completion (called when mouse is released after drawing)
   const handleLineComplete = useCallback((line) => {
@@ -1322,6 +1347,21 @@ function App() {
             </div>
           </div>
         </div>
+
+        {/* Route Distance Display */}
+        {routeDistance !== null && (
+          <div className="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-2xl p-4 mb-4 shadow-xl">
+            <div className="flex items-center justify-center gap-4 text-white">
+              <span className="text-lg font-medium">Route Distance:</span>
+              <span className="text-3xl font-bold">
+                {routeDistance.toFixed(2)} mi
+              </span>
+              <span className="text-xl opacity-80">
+                ({(routeDistance * 1.60934).toFixed(2)} km)
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Map */}
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden" style={{ minHeight: '600px' }}>

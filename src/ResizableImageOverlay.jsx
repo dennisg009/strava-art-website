@@ -69,14 +69,22 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
     const updateMarkerPositions = (newBounds) => {
       if (markersRef.current.length < 9) return
       
+      // Use Leaflet bounds to get exact corner positions
+      const leafletBounds = L.latLngBounds(newBounds[0], newBounds[1])
+      const sw = leafletBounds.getSouthWest()
+      const ne = leafletBounds.getNorthEast()
+      // Construct other corners from SW and NE
+      const se = L.latLng(sw.lat, ne.lng) // Southeast: south lat, east lng
+      const nw = L.latLng(ne.lat, sw.lng) // Northwest: north lat, west lng
+      
       const newCenterLat = (newBounds[0][0] + newBounds[1][0]) / 2
       const newCenterLng = (newBounds[0][1] + newBounds[1][1]) / 2
       
-      // Update corner markers
-      markersRef.current[0].setLatLng([newBounds[0][0], newBounds[0][1]]) // SW
-      markersRef.current[1].setLatLng([newBounds[0][0], newBounds[1][1]]) // SE
-      markersRef.current[2].setLatLng([newBounds[1][0], newBounds[1][1]]) // NE
-      markersRef.current[3].setLatLng([newBounds[1][0], newBounds[0][1]]) // NW
+      // Update corner markers using exact corner positions
+      markersRef.current[0].setLatLng([sw.lat, sw.lng]) // SW
+      markersRef.current[1].setLatLng([se.lat, se.lng]) // SE
+      markersRef.current[2].setLatLng([ne.lat, ne.lng]) // NE
+      markersRef.current[3].setLatLng([nw.lat, nw.lng]) // NW
       
       // Update edge markers
       markersRef.current[4].setLatLng([newCenterLat, newBounds[0][1]]) // West
@@ -166,11 +174,19 @@ function ResizableImageOverlay({ url, bounds, opacity, aspectRatio, onBoundsChan
     map.on('mouseup', onMouseUp)
 
     // Corner handles (diagonal resize - preserve aspect ratio)
+    // Ensure we use the exact bounds from the overlay for precise positioning
+    const overlayBounds = imageOverlay.getBounds()
+    const sw = overlayBounds.getSouthWest()
+    const ne = overlayBounds.getNorthEast()
+    // Construct other corners from SW and NE
+    const se = L.latLng(sw.lat, ne.lng) // Southeast: south lat, east lng
+    const nw = L.latLng(ne.lat, sw.lng) // Northwest: north lat, west lng
+    
     const cornerPositions = [
-      [bounds[0][0], bounds[0][1]], // Southwest (index 0)
-      [bounds[0][0], bounds[1][1]], // Southeast (index 1)
-      [bounds[1][0], bounds[1][1]], // Northeast (index 2)
-      [bounds[1][0], bounds[0][1]]  // Northwest (index 3)
+      [sw.lat, sw.lng], // Southwest (index 0)
+      [se.lat, se.lng], // Southeast (index 1)
+      [ne.lat, ne.lng], // Northeast (index 2)
+      [nw.lat, nw.lng]  // Northwest (index 3)
     ]
 
     const cornerCursors = ['nesw-resize', 'nwse-resize', 'nesw-resize', 'nwse-resize']

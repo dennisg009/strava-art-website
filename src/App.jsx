@@ -1093,7 +1093,7 @@ function App() {
                 <div className="flex flex-col gap-2">
                   <label className="font-semibold text-gray-700 flex items-center">
                     Reference Overlay (PNG)
-                    <Tooltip content="Upload a reference image or sketch. PNGs support transparency, allowing you to see the map underneath so you can manually trace your route." />
+                    <Tooltip position="bottom-right" content="Upload a reference image or sketch. PNGs support transparency, allowing you to see the map underneath so you can manually trace your route." />
                   </label>
                   <div className="flex gap-2">
                     <input
@@ -1335,7 +1335,7 @@ function App() {
             <div className="flex flex-col gap-2">
               <label className="font-semibold text-gray-700">
                 Export
-                <Tooltip content={
+                <Tooltip position="top-left" content={
                   <>
                     This button converts your design into a GPS Exchange Format (.gpx) file. You can upload this file directly to Strava, Garmin, Organic Maps, or other fitness apps to follow your custom artwork as a guided route during your next run or ride!
                   </>

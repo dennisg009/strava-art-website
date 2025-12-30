@@ -1296,7 +1296,14 @@ function App() {
                   onChange={(e) => setSnapToRoads(e.target.checked)}
                   className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500"
                 />
-                <span className="text-gray-700">Snap to Roads (OSRM)</span>
+                <span className="text-gray-700">
+                  Snap to Roads (OSRM)
+                  <Tooltip content={
+                    <>
+                      What is Snap to Roads? When enabled, this uses the <strong>Open Source Routing Machine (OSRM)</strong> to automatically align your drawing with real-world streets and paths. This ensures your Strava art follows runnable roads rather than cutting through buildings or water, making your route safe and accurate to navigate! You should enable this for every route unless it's in an open field or body of water.
+                    </>
+                  } />
+                </span>
               </label>
               {isRouting && (
                 <p className="text-sm text-indigo-600">Routing...</p>
@@ -1326,7 +1333,14 @@ function App() {
 
             {/* Export Button */}
             <div className="flex flex-col gap-2">
-              <label className="font-semibold text-gray-700">Export</label>
+              <label className="font-semibold text-gray-700">
+                Export as GPX
+                <Tooltip content={
+                  <>
+                    <strong>What is a GPX file?</strong> This button converts your design into a <strong>GPS Exchange Format (.gpx) file</strong>. You can upload this file directly to Strava, Garmin, Organic Maps, or other fitness apps to follow your custom artwork as a guided route during your next run or ride!
+                  </>
+                } />
+              </label>
               <button
                 onClick={exportGPX}
                 disabled={points.length === 0}

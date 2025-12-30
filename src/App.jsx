@@ -198,37 +198,6 @@ function App() {
     setDrawnLines([])
   }, [drawnLines])
 
-  // Convert drawings to route points (with optional road snapping)
-  const convertDrawingsToRoute = useCallback(async () => {
-    if (drawnLines.length === 0) {
-      alert('No drawings to convert')
-      return
-    }
-    
-    // Flatten all drawn lines into a single route
-    const allPoints = drawnLines.flat()
-    
-    if (snapToRoads && allPoints.length >= 2) {
-      // Snap to roads using OSRM
-      setIsSnappingRoads(true)
-      try {
-        const snappedPoints = await snapToRoadsOSRM(allPoints)
-        setPoints(snappedPoints)
-        alert(`Converted ${drawnLines.length} line(s) to road-snapped route with ${snappedPoints.length} points`)
-      } catch (err) {
-        console.error('Road snapping error:', err)
-        // Fall back to direct points
-        setPoints(allPoints)
-        alert(`Road snapping failed. Converted to ${allPoints.length} points without snapping.`)
-      } finally {
-        setIsSnappingRoads(false)
-      }
-    } else {
-      setPoints(allPoints)
-      alert(`Converted ${drawnLines.length} line(s) to route with ${allPoints.length} points`)
-    }
-  }, [drawnLines, snapToRoads, snapToRoadsOSRM])
-
   // Get OSRM route between two points
   const getOSRMRoute = useCallback(async (start, end) => {
     // Use HTTPS and the public OSRM instance
@@ -321,6 +290,37 @@ function App() {
     
     return snappedPoints
   }, [getOSRMRoute])
+
+  // Convert drawings to route points (with optional road snapping)
+  const convertDrawingsToRoute = useCallback(async () => {
+    if (drawnLines.length === 0) {
+      alert('No drawings to convert')
+      return
+    }
+    
+    // Flatten all drawn lines into a single route
+    const allPoints = drawnLines.flat()
+    
+    if (snapToRoads && allPoints.length >= 2) {
+      // Snap to roads using OSRM
+      setIsSnappingRoads(true)
+      try {
+        const snappedPoints = await snapToRoadsOSRM(allPoints)
+        setPoints(snappedPoints)
+        alert(`Converted ${drawnLines.length} line(s) to road-snapped route with ${snappedPoints.length} points`)
+      } catch (err) {
+        console.error('Road snapping error:', err)
+        // Fall back to direct points
+        setPoints(allPoints)
+        alert(`Road snapping failed. Converted to ${allPoints.length} points without snapping.`)
+      } finally {
+        setIsSnappingRoads(false)
+      }
+    } else {
+      setPoints(allPoints)
+      alert(`Converted ${drawnLines.length} line(s) to route with ${allPoints.length} points`)
+    }
+  }, [drawnLines, snapToRoads, snapToRoadsOSRM])
 
   // Handle map click to add points
   const handleMapClick = useCallback(async (e) => {

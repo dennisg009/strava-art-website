@@ -1503,6 +1503,11 @@ function App() {
           </ul>
         </div>
       </div>
+
+      {/* Footer */}
+      <footer className="text-center py-4">
+        <p className="text-white text-sm opacity-75">Built by Dennis Gavrilenko in 2025</p>
+      </footer>
     </div>
   )
 }

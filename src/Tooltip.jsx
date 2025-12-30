@@ -16,15 +16,15 @@ export function Tooltip({ children, content }) {
       <AnimatePresence>
         {isVisible && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -10 }}
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -10 }}
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
             transition={{ duration: 0.2 }}
-            className="absolute z-50 left-0 top-full mt-2 w-64 p-3 bg-gray-900 text-white text-sm rounded-lg shadow-xl pointer-events-none"
+            className="absolute z-50 left-0 bottom-full mb-2 w-80 p-3 bg-gray-900 text-white text-sm rounded-lg shadow-xl pointer-events-none"
             style={{ left: '50%', transform: 'translateX(-50%)' }}
           >
             {content}
-            <div className="absolute -top-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-gray-900"></div>
+            <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
           </motion.div>
         )}
       </AnimatePresence>

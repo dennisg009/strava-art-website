@@ -198,8 +198,8 @@ function App() {
     setDrawnLines([])
   }, [drawnLines])
 
-  // Convert drawings to route points
-  const convertDrawingsToRoute = useCallback(() => {
+  // Convert drawings to route points (with optional road snapping)
+  const convertDrawingsToRoute = useCallback(async () => {
     if (drawnLines.length === 0) {
       alert('No drawings to convert')
       return
@@ -207,9 +207,27 @@ function App() {
     
     // Flatten all drawn lines into a single route
     const allPoints = drawnLines.flat()
-    setPoints(allPoints)
-    alert(`Converted ${drawnLines.length} line(s) to route with ${allPoints.length} points`)
-  }, [drawnLines])
+    
+    if (snapToRoads && allPoints.length >= 2) {
+      // Snap to roads using OSRM
+      setIsSnappingRoads(true)
+      try {
+        const snappedPoints = await snapToRoadsOSRM(allPoints)
+        setPoints(snappedPoints)
+        alert(`Converted ${drawnLines.length} line(s) to road-snapped route with ${snappedPoints.length} points`)
+      } catch (err) {
+        console.error('Road snapping error:', err)
+        // Fall back to direct points
+        setPoints(allPoints)
+        alert(`Road snapping failed. Converted to ${allPoints.length} points without snapping.`)
+      } finally {
+        setIsSnappingRoads(false)
+      }
+    } else {
+      setPoints(allPoints)
+      alert(`Converted ${drawnLines.length} line(s) to route with ${allPoints.length} points`)
+    }
+  }, [drawnLines, snapToRoads, snapToRoadsOSRM])
 
   // Get OSRM route between two points
   const getOSRMRoute = useCallback(async (start, end) => {
@@ -1219,10 +1237,10 @@ function App() {
                   {/* Convert to Route */}
                   <button
                     onClick={convertDrawingsToRoute}
-                    disabled={drawnLines.length === 0}
+                    disabled={drawnLines.length === 0 || isSnappingRoads}
                     className="px-4 py-3 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed md:col-span-2"
                   >
-                    ✅ Convert to Route ({drawnLines.length} lines)
+                    {isSnappingRoads ? 'Snapping to Roads...' : `Convert to Route (${drawnLines.length} lines)${snapToRoads ? ' + Snap' : ''}`}
                   </button>
                 </div>
 
@@ -1409,15 +1427,15 @@ function App() {
               <span>Upload a transparent PNG image to overlay and trace over</span>
             </li>
             <li className="flex items-start gap-2">
-              <span className="text-purple-500">✨</span>
+              <span className="text-indigo-600">→</span>
               <span><strong>Trace & Snap:</strong> Position your PNG, then click to auto-trace outline and snap to roads</span>
             </li>
             <li className="flex items-start gap-2">
-              <span className="text-orange-500">✏️</span>
+              <span className="text-indigo-600">→</span>
               <span><strong>Drawing Mode:</strong> Click "Start Drawing" then draw freely on the map with your mouse</span>
             </li>
             <li className="flex items-start gap-2">
-              <span className="text-orange-500">↩️</span>
+              <span className="text-indigo-600">→</span>
               <span>Use Undo/Redo to correct mistakes, and "Convert to Route" when done</span>
             </li>
             <li className="flex items-start gap-2">
@@ -1426,7 +1444,7 @@ function App() {
             </li>
             <li className="flex items-start gap-2">
               <span className="text-indigo-600">→</span>
-              <span>Export your route as GPX for use in Strava</span>
+              <span>Export your route as GPX for use in Strava Premium or Organic Maps (free)</span>
             </li>
           </ul>
         </div>
